@@ -58,13 +58,13 @@ export function Navbar() {
               >
                 <span
                   className={cn(
-                    "h-[1.5px] w-3.5 rounded bg-ink transition-all duration-300",
+                    "h-[2px] w-3.5 rounded bg-ink transition-all duration-300",
                     open && "translate-y-[2.75px] rotate-45",
                   )}
                 />
                 <span
                   className={cn(
-                    "h-[1.5px] w-3.5 rounded bg-ink transition-all duration-300",
+                    "h-[2px] w-3.5 rounded bg-ink transition-all duration-300",
                     open && "-translate-y-[2.75px] -rotate-45",
                   )}
                 />

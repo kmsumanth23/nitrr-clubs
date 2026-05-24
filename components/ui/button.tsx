@@ -24,7 +24,6 @@ interface BaseProps {
   variant?: Variant;
   size?: Size;
   className?: string;
-  children: React.ReactNode;
 }
 
 // As a <button>
@@ -36,6 +35,7 @@ interface ButtonProps
 // As a <Link>
 interface LinkProps extends BaseProps {
   href: string;
+  children?: React.ReactNode;
 }
 
 export function Button(props: ButtonProps | LinkProps) {
