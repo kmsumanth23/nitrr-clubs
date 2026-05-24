@@ -1,20 +1,45 @@
-/**
- * Placeholder home — confirms the shared shell (nav + footer) renders.
- * Replaced by the real 10-section landing at step 4.
- */
-export default function HomePage() {
+import { Hero } from "@/components/sections/hero";
+import { Stats } from "@/components/sections/stats";
+import { ExploreClubs } from "@/components/sections/explore-clubs";
+import { HowItWorks } from "@/components/sections/how-it-works";
+import { Events } from "@/components/sections/events";
+import { GalleryMarquee } from "@/components/sections/gallery-marquee";
+import { Socials } from "@/components/sections/socials";
+import { Faqs } from "@/components/sections/faq";
+import { FinalCta } from "@/components/sections/final-cta";
+import {
+  getPopularClubs,
+  getUpcomingEvents,
+  getFaqs,
+  getGalleryImages,
+  getSiteStats,
+} from "@/lib/queries/home";
+
+// ISR: rebuild at most once a minute. New clubs/events appear without redeploy,
+// while the page stays static-fast and SEO-friendly.
+export const revalidate = 60;
+
+export default async function HomePage() {
+  // Fetch everything in parallel on the server.
+  const [clubs, events, faqs, gallery, stats] = await Promise.all([
+    getPopularClubs(6),
+    getUpcomingEvents(5),
+    getFaqs(),
+    getGalleryImages(16),
+    getSiteStats(),
+  ]);
+
   return (
-    <section className="flex min-h-[70vh] flex-col items-center justify-center gap-3 px-6 pt-28 text-center">
-      <p className="text-sm font-medium text-clay">
-        National Institute of Technology · Raipur
-      </p>
-      <h1 className="font-display text-5xl font-extrabold tracking-tightest text-ink sm:text-6xl">
-        NITRR Clubs<span className="text-indigo">.</span>
-      </h1>
-      <p className="max-w-md text-ink-soft">
-        Shared shell is live — frosted nav pills above, dark footer below. The
-        real 10-section homepage gets built next at step 4.
-      </p>
-    </section>
+    <>
+      <Hero images={gallery} />
+      <Stats stats={stats} />
+      <ExploreClubs clubs={clubs} />
+      <HowItWorks />
+      <Events events={events} />
+      <GalleryMarquee images={gallery} />
+      <Socials />
+      <Faqs faqs={faqs} />
+      <FinalCta clubCount={stats.clubs} />
+    </>
   );
 }
