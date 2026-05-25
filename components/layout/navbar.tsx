@@ -2,23 +2,45 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { siteConfig } from "@/lib/site-config";
 import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
 
 /**
  * Split frosted-glass nav, fixed at top.
- *  - Left pill: logo (→ home) + hamburger. Hamburger expands the pill
- *    rightward to reveal the nav links. Collapses on outside click / Escape.
- *  - Right pill: Sign In → opens the centered auth modal.
+ *  - Left pill: logo (-> home) + hamburger. Hamburger expands the pill
+ *    rightward to reveal nav links. Collapses on outside click / Escape / link click.
+ *  - Right pill: Sign In -> opens the centered auth modal.
+ *
+ * Nav targets:
+ *   Home   -> #hero      (scroll)
+ *   Clubs  -> #clubs     (scroll)
+ *   Events -> #events    (scroll)
+ *   Gallery-> /gallery   (navigate)
+ *   About  -> /about     (navigate; page built later)
+ *
+ * Scroll links work via in-page anchors when already on "/"; otherwise they
+ * route to "/#id" and the browser scrolls after navigation.
  */
+
+type NavItem = { label: string; type: "scroll" | "route"; target: string };
+
+const NAV: NavItem[] = [
+  { label: "Home", type: "scroll", target: "hero" },
+  { label: "Clubs", type: "scroll", target: "clubs" },
+  { label: "Events", type: "scroll", target: "events" },
+  { label: "Gallery", type: "route", target: "/gallery" },
+  { label: "About", type: "route", target: "/about" },
+];
+
 export function Navbar() {
   const [open, setOpen] = React.useState(false);
   const [authOpen, setAuthOpen] = React.useState(false);
   const leftRef = React.useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+  const router = useRouter();
 
-  // collapse on outside click + Escape
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (leftRef.current && !leftRef.current.contains(e.target as Node))
@@ -32,6 +54,23 @@ export function Navbar() {
       document.removeEventListener("keydown", onKey);
     };
   }, []);
+
+  function go(item: NavItem) {
+    setOpen(false); // collapse the pill after any link click
+    if (item.type === "route") {
+      router.push(item.target);
+      return;
+    }
+    // scroll target
+    if (pathname === "/") {
+      document
+        .getElementById(item.target)
+        ?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      // navigate home with hash; section ids let the browser scroll
+      router.push(`/#${item.target}`);
+    }
+  }
 
   return (
     <>
@@ -58,45 +97,41 @@ export function Navbar() {
               >
                 <span
                   className={cn(
-                    "h-[2px] w-3.5 rounded bg-ink transition-all duration-300",
+                    "h-[1.5px] w-3.5 rounded bg-ink transition-all duration-300",
                     open && "translate-y-[2.75px] rotate-45",
                   )}
                 />
                 <span
                   className={cn(
-                    "h-[2px] w-3.5 rounded bg-ink transition-all duration-300",
+                    "h-[1.5px] w-3.5 rounded bg-ink transition-all duration-300",
                     open && "-translate-y-[2.75px] -rotate-45",
                   )}
                 />
               </button>
             </div>
 
-            {/* expanding links */}
+            {/* expanding links — bigger tap targets */}
             <nav
               className={cn(
                 "flex items-center overflow-hidden whitespace-nowrap transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
-                open ? "max-w-[460px] pr-2 opacity-100" : "max-w-0 opacity-0",
+                open ? "max-w-[520px] pr-2 opacity-100" : "max-w-0 opacity-0",
               )}
             >
-              {siteConfig.nav.map((item) => (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setOpen(false)}
-                  className="rounded-full px-3 py-1.5 text-[13px] text-ink-soft hover:bg-ink/5 hover:text-ink"
+              {NAV.map((item) => (
+                <button
+                  key={item.label}
+                  onClick={() => go(item)}
+                  className="rounded-full px-4 py-2.5 text-sm text-ink-soft hover:bg-ink/5 hover:text-ink"
                 >
                   {item.label}
-                </Link>
+                </button>
               ))}
             </nav>
           </Pill>
         </div>
 
         {/* RIGHT PILL */}
-        <button
-          onClick={() => setAuthOpen(true)}
-          className="pointer-events-auto"
-        >
+        <button onClick={() => setAuthOpen(true)} className="pointer-events-auto">
           <Pill className="whitespace-nowrap px-[22px] py-[11px] text-[13px] font-medium text-ink hover:bg-white/80">
             Sign In
           </Pill>
