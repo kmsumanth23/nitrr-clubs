@@ -3,25 +3,17 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { IconUser, IconLayoutDashboard, IconLogout } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
+import { useUser } from "@/lib/hooks/use-user";
 
 /**
  * Split frosted-glass nav, fixed at top.
- *  - Left pill: logo (-> home) + hamburger. Hamburger expands the pill
- *    rightward to reveal nav links. Collapses on outside click / Escape / link click.
- *  - Right pill: Sign In -> opens the centered auth modal.
- *
- * Nav targets:
- *   Home   -> #hero      (scroll)
- *   Clubs  -> #clubs     (scroll)
- *   Events -> #events    (scroll)
- *   Gallery-> /gallery   (navigate)
- *   About  -> /about     (navigate; page built later)
- *
- * Scroll links work via in-page anchors when already on "/"; otherwise they
- * route to "/#id" and the browser scrolls after navigation.
+ *  - Left pill: logo (-> home) + hamburger expanding to nav links.
+ *  - Right pill: Sign In (logged out) OR avatar menu (logged in: Profile,
+ *    Admin if admin/super_admin, Sign out).
  */
 
 type NavItem = { label: string; type: "scroll" | "route"; target: string };
@@ -37,16 +29,27 @@ const NAV: NavItem[] = [
 export function Navbar() {
   const [open, setOpen] = React.useState(false);
   const [authOpen, setAuthOpen] = React.useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
   const leftRef = React.useRef<HTMLDivElement>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const router = useRouter();
+  const { user, role, loading } = useUser();
+  const isAdmin = role === "admin" || role === "super_admin";
 
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (leftRef.current && !leftRef.current.contains(e.target as Node))
         setOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+        setMenuOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        setMenuOpen(false);
+      }
+    };
     document.addEventListener("click", onClick);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -56,21 +59,22 @@ export function Navbar() {
   }, []);
 
   function go(item: NavItem) {
-    setOpen(false); // collapse the pill after any link click
+    setOpen(false);
     if (item.type === "route") {
       router.push(item.target);
       return;
     }
-    // scroll target
     if (pathname === "/") {
-      document
-        .getElementById(item.target)
-        ?.scrollIntoView({ behavior: "smooth" });
+      document.getElementById(item.target)?.scrollIntoView({ behavior: "smooth" });
     } else {
-      // navigate home with hash; section ids let the browser scroll
       router.push(`/#${item.target}`);
     }
   }
+
+  const initial =
+    user?.email?.[0]?.toUpperCase() ??
+    user?.user_metadata?.name?.[0]?.toUpperCase() ??
+    "U";
 
   return (
     <>
@@ -110,7 +114,6 @@ export function Navbar() {
               </button>
             </div>
 
-            {/* expanding links — bigger tap targets */}
             <nav
               className={cn(
                 "flex items-center overflow-hidden whitespace-nowrap transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]",
@@ -131,11 +134,54 @@ export function Navbar() {
         </div>
 
         {/* RIGHT PILL */}
-        <button onClick={() => setAuthOpen(true)} className="pointer-events-auto">
-          <Pill className="whitespace-nowrap px-[22px] py-[11px] text-[13px] font-medium text-ink hover:bg-white/80">
-            Sign In
-          </Pill>
-        </button>
+        <div ref={menuRef} className="pointer-events-auto">
+          {loading ? null : user ? (
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label="Account menu"
+                className="flex items-center"
+              >
+                <Pill className="flex h-[42px] w-[42px] items-center justify-center text-sm font-semibold text-ink">
+                  {initial}
+                </Pill>
+              </button>
+
+              {menuOpen && (
+                <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-2xl border border-line bg-white py-1 shadow-soft">
+                  <Link
+                    href="/profile"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink hover:bg-cream"
+                  >
+                    <IconUser size={16} /> Profile
+                  </Link>
+                  {isAdmin && (
+                    <Link
+                      href="/admin"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-ink hover:bg-cream"
+                    >
+                      <IconLayoutDashboard size={16} /> Admin
+                    </Link>
+                  )}
+                  <a
+                    href="/auth/signout"
+                    className="flex items-center gap-2.5 border-t border-line px-4 py-2.5 text-sm text-clay hover:bg-cream"
+                  >
+                    <IconLogout size={16} /> Sign out
+                  </a>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button onClick={() => setAuthOpen(true)}>
+              <Pill className="whitespace-nowrap px-[22px] py-[11px] text-[13px] font-medium text-ink hover:bg-white/80">
+                Sign In
+              </Pill>
+            </button>
+          )}
+        </div>
       </header>
 
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />

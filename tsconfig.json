@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@/lib/supabase/server": ["./lib/supabase/supabase__server.ts"],
+      "@/lib/supabase/client": ["./lib/supabase/supabase__client.ts"]
     }
   },
   "include": [

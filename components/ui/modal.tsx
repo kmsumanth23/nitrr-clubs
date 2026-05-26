@@ -39,6 +39,7 @@ export function Modal({ open, onClose, children, className }: ModalProps) {
       <div
         className={cn(
           "relative w-full max-w-sm rounded-[20px] bg-cream p-7 shadow-2xl",
+          "max-h-[90vh] overflow-y-auto",
           "motion-safe:animate-modal-pop",
           className,
         )}

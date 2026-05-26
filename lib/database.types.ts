@@ -369,8 +369,10 @@ export type Database = {
           created_at: string
           email: string | null
           full_name: string | null
+          gender: string | null
           id: string
           role: Database["public"]["Enums"]["user_role"]
+          roll_number: string | null
           updated_at: string
           year: number | null
         }
@@ -380,8 +382,10 @@ export type Database = {
           created_at?: string
           email?: string | null
           full_name?: string | null
+          gender?: string | null
           id: string
           role?: Database["public"]["Enums"]["user_role"]
+          roll_number?: string | null
           updated_at?: string
           year?: number | null
         }
@@ -391,8 +395,10 @@ export type Database = {
           created_at?: string
           email?: string | null
           full_name?: string | null
+          gender?: string | null
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
+          roll_number?: string | null
           updated_at?: string
           year?: number | null
         }
