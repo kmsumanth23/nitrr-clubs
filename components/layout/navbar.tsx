@@ -2,19 +2,31 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconUser, IconLayoutDashboard, IconLogout } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
 import { useUser } from "@/lib/hooks/use-user";
 
-/**
- * Split frosted-glass nav, fixed at top.
- *  - Left pill: logo (-> home) + hamburger expanding to nav links.
- *  - Right pill: Sign In (logged out) OR avatar menu (logged in: Profile,
- *    Admin if admin/super_admin, Sign out).
- */
+/** Isolated so it can be wrapped in Suspense — useSearchParams() opts the
+ *  entire component tree out of static rendering if used without a boundary. */
+function SearchParamsSync({
+  user,
+  setNextParam,
+  openAuth,
+}: {
+  user: unknown;
+  setNextParam: (v: string) => void;
+  openAuth: () => void;
+}) {
+  const searchParams = useSearchParams();
+  React.useEffect(() => {
+    setNextParam(searchParams.get("next") ?? "/");
+    if (searchParams.get("signin") === "1" && !user) openAuth();
+  }, [searchParams, user, setNextParam, openAuth]);
+  return null;
+}
 
 type NavItem = { label: string; type: "scroll" | "route"; target: string };
 
@@ -30,6 +42,7 @@ export function Navbar() {
   const [open, setOpen] = React.useState(false);
   const [authOpen, setAuthOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [nextParam, setNextParam] = React.useState("/");
   const leftRef = React.useRef<HTMLDivElement>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const pathname = usePathname();
@@ -76,8 +89,13 @@ export function Navbar() {
     user?.user_metadata?.name?.[0]?.toUpperCase() ??
     "U";
 
+  const openAuth = React.useCallback(() => setAuthOpen(true), []);
+
   return (
     <>
+      <React.Suspense>
+        <SearchParamsSync user={user} setNextParam={setNextParam} openAuth={openAuth} />
+      </React.Suspense>
       <header className="pointer-events-none fixed inset-x-0 top-0 z-50 flex items-start justify-between p-4">
         {/* LEFT PILL */}
         <div ref={leftRef} className="pointer-events-auto">
@@ -184,7 +202,11 @@ export function Navbar() {
         </div>
       </header>
 
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <AuthModal
+        open={authOpen}
+        onClose={() => setAuthOpen(false)}
+        next={nextParam}
+      />
     </>
   );
 }

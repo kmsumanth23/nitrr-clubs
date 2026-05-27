@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { IconArrowLeft } from "@tabler/icons-react";
-import { createClient } from "@/lib/supabase/supabase__server";
+import { createClient } from "@/lib/supabase/server";
 import { ApplyForm } from "@/components/clubs/apply-form";
 
 export const metadata = { title: "Apply — NITRR Clubs" };
@@ -13,6 +13,15 @@ export default async function ApplyPage({
 }) {
   const { slug } = await params;
   const supabase = await createClient();
+
+  // Auth check FIRST, with the known slug, so we can return the user precisely
+  // to this apply page after they sign in.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect(`/?signin=1&next=${encodeURIComponent(`/clubs/${slug}/apply`)}`);
+  }
 
   // club (need id + name)
   const { data: club } = await supabase
@@ -26,13 +35,10 @@ export default async function ApplyPage({
   if (!club.is_recruiting) redirect(`/clubs/${slug}`);
 
   // profile + completeness gate
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
   const { data: profile } = await supabase
     .from("profiles")
     .select("full_name, roll_number, year, branch")
-    .eq("id", user!.id)
+    .eq("id", user.id)
     .maybeSingle();
 
   // missing required info (e.g. Google sign-in) → complete profile first

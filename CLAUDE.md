@@ -14,8 +14,8 @@ through this build. Prefer clear, conventional, well-structured code over clever
 Explanations in chat should be **terse** unless asked to expand.
 
 ## Tech stack (locked)
-- **Next.js 14** App Router + **TypeScript**
-- **Tailwind CSS** with custom design tokens (no CSS-in-JS)
+- **Next.js 16** App Router + **TypeScript**
+- **Tailwind CSS v4** with custom design tokens (no CSS-in-JS)
 - **shadcn/ui** + Radix for accessible primitives
 - **Framer Motion** for animation (scroll reveals, flips)
 - **Supabase**: Postgres (data), Auth (email + Google OAuth, **no domain restriction**),
@@ -44,20 +44,22 @@ app/
     page.tsx          # /            landing (10 sections)        [ISR]
     clubs/page.tsx    # /clubs       list + filter pills          [ISR + CSR island]
     clubs/[slug]/page.tsx                                          [ISR]
-    clubs/[slug]/apply/page.tsx     # auth-gated                  [SSR + CSR form]
     events/page.tsx   # /events                                   [ISR]
     events/[slug]/page.tsx                                         [ISR]
     gallery/page.tsx  # /gallery                                  [ISR]
     about/page.tsx    /faq/page.tsx /contact/page.tsx             [SSG]
   (auth)/             # minimal layout (sign-in is mostly a modal on /)
     auth/callback/route.ts          # OAuth redirect handler
+    auth/signout/route.ts           # clears session, redirects home
   (student)/          # session-guarded
-    profile/page.tsx  # /profile, my applications                 [SSR]
+    profile/page.tsx          # /profile, my applications         [SSR]
+    profile/complete/page.tsx # /profile/complete, for OAuth users missing fields [SSR]
+    clubs/[slug]/apply/page.tsx     # auth-gated apply flow       [SSR + CSR form]
   (admin)/            # role-guarded (admin / super_admin)
     admin/page.tsx and sub-pages: club, events, gallery, applications [SSR]
   layout.tsx          # root: fonts + globals
   not-found.tsx
-middleware.ts         # refreshes Supabase session on every request
+proxy.ts              # Next.js 16 equivalent of middleware.ts — refreshes Supabase session
 ```
 Route groups in `(parens)` don't affect the URL; they share a `layout.tsx`.
 Guards live in each group's `layout.tsx` (check session/role, redirect) — RLS is the
@@ -91,7 +93,8 @@ Tokens live in `tailwind.config.ts` + `app/globals.css` (CSS vars).
 
 ## Database (schema is a living doc; see supabase/*.sql)
 `clubs` is the central hub; most tables FK to it via `club_id`.
-Tables: `profiles` (extends `auth.users`; `role` enum student/admin/super_admin),
+Tables: `profiles` (extends `auth.users`; `role` enum student/admin/super_admin;
+  extra columns: `roll_number text`, `gender text` — added via migration),
 `categories`, `clubs` (slug, category_id, highlights[], is_recruiting),
 `club_admins` (AUTHORIZATION: who may edit a club — many-to-many),
 `club_team` (DISPLAY-ONLY coordinators; may have no account),
@@ -103,13 +106,31 @@ RLS pattern: content tables = public read, writes restricted to club admins
 own; club admin sees/updates applications for clubs they manage. Helper SQL functions:
 `is_club_admin(uuid)`, `is_super_admin()`.
 
+### Types workflow
+`lib/database.types.ts` is auto-generated — never hand-edit the main body.
+When adding a column: (1) run SQL migration, (2) run
+`npx supabase gen types typescript --project-id <id> > lib/database.types.ts`,
+(3) re-append the convenience alias block at the bottom of the file (the
+`export type Club = ...` lines). The TS types are a mirror of Postgres — if they
+drift, writes silently drop unknown fields with no compile error.
+
+### Google OAuth users
+OAuth users bypass the sign-up form and have `roll_number/branch/gender = null`.
+`/profile/complete` exists for them to fill in missing fields. Future: redirect
+there automatically on first login by checking `roll_number IS NULL` in the
+`(student)` layout guard.
+
 ## Conventions
 - Path alias `@/*` → project root. Imports: `@/lib/...`, `@/components/...`.
-- Supabase clients: `@/lib/supabase/client` (Client Components),
-  `@/lib/supabase/server` (Server Components/actions/route handlers). Never use the
-  service-role key in client code.
-- Data access: write typed query functions in `lib/queries/*` (added from step 4) —
-  pages call those, not raw Supabase inline, so logic stays testable.
+- Supabase clients — actual files use double-underscore names; `tsconfig.json` has
+  aliases so both forms resolve correctly:
+  - `@/lib/supabase/client` → `supabase__client.ts` (Client Components, browser)
+  - `@/lib/supabase/server` → `supabase__server.ts` (Server Components, actions, route handlers)
+  - `supabase__middleware.ts` — used only by `proxy.ts`
+  - `supabase__static.ts` — cookie-free client for `generateStaticParams` (build time)
+  - Never use the service-role key in client code.
+- Data access: write typed query functions in `lib/queries/*` — pages call those,
+  not raw Supabase inline, so logic stays testable.
 - Types from `@/lib/database.types` (`Club`, `EventRow`, `Profile`, ...).
 - Forms: Zod schema in `lib/validation/*`, shared by RHF (client) and the server action.
 - Server Components by default; add `"use client"` only for interactivity (flips,
@@ -117,6 +138,8 @@ own; club admin sees/updates applications for clubs they manage. Helper SQL func
 - Auth tokens live in httpOnly cookies via `@supabase/ssr` — never localStorage.
 - No secrets in the repo. `.env.local` is gitignored; template is `.env.local.example`.
 - Don't commit the `build/`/`.next/` output. Run `npm run lint` + `prettier` before commits.
+- `generateStaticParams` must use `supabase__static.ts` — `supabase__server.ts` calls
+  `cookies()` which throws at build time.
 
 ## Things to NOT do (mistakes from the old project)
 - No per-club hardcoded HTML pages — one `/clubs/[slug]` template fed by the DB.
@@ -125,13 +148,16 @@ own; club admin sees/updates applications for clubs they manage. Helper SQL func
 - No tokens in localStorage. No committed build artifacts. No inline-style soup.
 
 ## Build order (progress)
-1. ✅ Scaffold + tooling (Next, TS, Tailwind tokens, fonts, ESLint/Prettier)
+1. ✅ Scaffold + tooling (Next.js 16, TS, Tailwind v4 tokens, fonts, ESLint/Prettier)
 2. ✅ Supabase: schema SQL, RLS, seed, client/server/middleware helpers, types
-3. ⬜ Design system + nav + footer (shared shell, UI primitives)
-4. ⬜ Landing page — all 10 sections wired to Supabase
-5. ⬜ Clubs: /clubs list + filter, /clubs/[slug] detail
-6. ⬜ Auth: sign-in/up modal + Google OAuth + callback + route guards
-7. ⬜ Apply flow: form + Zod + server action (RLS write)
+3. ✅ Design system + nav + footer (shared shell, UI primitives)
+4. ✅ Landing page — all 10 sections wired to Supabase (ISR, revalidate=60)
+5. ✅ Clubs: /clubs list + filter pills, /clubs/[slug] detail (ISR + generateStaticParams)
+6. ✅ Auth: sign-in/up modal + Google OAuth + callback + signout + route guards
+          Full sign-up form: name, email, password, roll number, branch, year, gender
+          Email confirmation disabled for dev (toggle in Supabase dashboard, no code change)
+7. ✅ Apply flow: /clubs/[slug]/apply page + Zod schema + server action (RLS write)
+          /profile/complete page for OAuth users missing profile fields
 8. ⬜ Events + Gallery full pages
 9. ⬜ Admin dashboard (club content, events, photos, application review)
 10. ⬜ Deploy: Vercel + GitHub Actions CI
@@ -148,3 +174,7 @@ npx prettier -w .   # format
 SQL in `supabase/` runs in order: 01_schema → 02_rls → 03_seed (Supabase SQL editor).
 Env vars in `.env.local` (URL, anon key, service-role key). Google OAuth redirect:
 `http://localhost:3000/auth/callback` (+ Vercel URL in prod).
+
+After running schema SQL, also grant table privileges to the `anon` and `authenticated`
+roles (not done automatically via raw SQL — see the grant statements in project history).
+Without these, all queries return 42501 even with correct RLS policies.

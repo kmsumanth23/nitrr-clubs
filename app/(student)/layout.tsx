@@ -1,11 +1,16 @@
 import { redirect } from "next/navigation";
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
-import { createClient } from "@/lib/supabase/supabase__server";
+import { createClient } from "@/lib/supabase/server";
 
 /**
- * GUARD (gate 1 of 2): requires a logged-in user. Runs on the server before
- * the page renders. RLS is the second gate on the data itself.
+ * GUARD (gate 1 of 2): requires a logged-in user.
+ *
+ * Note on the sign-in return trip: individual pages that know their own URL
+ * (e.g. the apply page) do their own auth check FIRST and redirect to
+ * `/?signin=1&next=<their path>` so the navbar can open the modal and return
+ * the user precisely. This layout is the catch-all backup: if a page didn't
+ * handle it, we still bounce to the sign-in prompt.
  */
 export default async function StudentLayout({
   children,
@@ -17,7 +22,7 @@ export default async function StudentLayout({
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect("/");
+  if (!user) redirect("/?signin=1");
 
   return (
     <>
