@@ -3,6 +3,7 @@ import Link from "next/link";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/server";
 import { ApplyForm } from "@/components/clubs/apply-form";
+import { isOpen, deadlineLabel } from "@/lib/deadline";
 
 export const metadata = { title: "Apply — NITRR Clubs" };
 
@@ -14,8 +15,6 @@ export default async function ApplyPage({
   const { slug } = await params;
   const supabase = await createClient();
 
-  // Auth check FIRST, with the known slug, so we can return the user precisely
-  // to this apply page after they sign in.
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -23,28 +22,56 @@ export default async function ApplyPage({
     redirect(`/?signin=1&next=${encodeURIComponent(`/clubs/${slug}/apply`)}`);
   }
 
-  // club (need id + name)
   const { data: club } = await supabase
     .from("clubs")
-    .select("id, name, slug, is_recruiting")
+    .select("id, name, slug, is_recruiting, recruitment_deadline")
     .eq("slug", slug)
     .maybeSingle();
   if (!club) notFound();
 
-  // recruitment closed → back to club page
   if (!club.is_recruiting) redirect(`/clubs/${slug}`);
 
-  // profile + completeness gate
+  // profile completeness gate
   const { data: profile } = await supabase
     .from("profiles")
     .select("full_name, roll_number, year, branch")
     .eq("id", user.id)
     .maybeSingle();
-
-  // missing required info (e.g. Google sign-in) → complete profile first
   if (!profile?.roll_number) {
     redirect(`/profile/complete?next=/clubs/${slug}/apply`);
   }
+
+  const open = isOpen(club.recruitment_deadline);
+
+  // already a member or admin? the DB trigger blocks it, but check here for a
+  // clean message instead of a failed submit.
+  const [{ data: membership }, { data: adminRow }, { data: existing }] =
+    await Promise.all([
+      supabase
+        .from("club_members")
+        .select("id")
+        .eq("club_id", club.id)
+        .eq("profile_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("club_admins")
+        .select("id")
+        .eq("club_id", club.id)
+        .eq("profile_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("applications")
+        .select("status")
+        .eq("club_id", club.id)
+        .eq("profile_id", user.id)
+        .maybeSingle(),
+    ]);
+
+  const blockReason = membership
+    ? "You're already a member of this club."
+    : adminRow
+      ? "You manage this club, so you can't apply to it."
+      : null;
 
   return (
     <section className="mx-auto max-w-xl px-6 pb-20 pt-28">
@@ -59,10 +86,26 @@ export default async function ApplyPage({
         Apply to {club.name}
       </h1>
       <p className="mb-8 mt-2 text-sm text-ink-soft">
-        A few quick questions. Your details below come from your profile.
+        {deadlineLabel(club.recruitment_deadline)}
       </p>
 
-      <ApplyForm clubId={club.id} clubName={club.name} profile={profile} />
+      {blockReason ? (
+        <div className="rounded-2xl border border-line bg-white p-6 text-sm text-ink">
+          {blockReason}
+        </div>
+      ) : !open ? (
+        <div className="rounded-2xl border border-line bg-white p-6 text-sm text-ink">
+          Applications for this club are closed. You may contact the club lead
+          for queries.
+        </div>
+      ) : (
+        <ApplyForm
+          clubId={club.id}
+          clubName={club.name}
+          profile={profile}
+          existingStatus={existing?.status ?? null}
+        />
+      )}
     </section>
   );
 }

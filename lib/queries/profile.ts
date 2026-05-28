@@ -7,7 +7,11 @@ import type {
 } from "@/lib/database.types";
 
 export interface MyApplication extends Application {
-  club: (Pick<Club, "name" | "slug"> & { category: Category | null }) | null;
+  club:
+    | (Pick<Club, "name" | "slug" | "recruitment_deadline"> & {
+        category: Category | null;
+      })
+    | null;
 }
 
 export interface MyMembership {
@@ -38,7 +42,9 @@ export async function getMyApplications(): Promise<MyApplication[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("applications")
-    .select("*, club:clubs(name, slug, category:categories(*))")
+    .select(
+      "*, club:clubs(name, slug, recruitment_deadline, category:categories(*))",
+    )
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as MyApplication[];

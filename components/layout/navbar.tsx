@@ -9,25 +9,6 @@ import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
 import { useUser } from "@/lib/hooks/use-user";
 
-/** Isolated so it can be wrapped in Suspense — useSearchParams() opts the
- *  entire component tree out of static rendering if used without a boundary. */
-function SearchParamsSync({
-  user,
-  setNextParam,
-  openAuth,
-}: {
-  user: unknown;
-  setNextParam: (v: string) => void;
-  openAuth: () => void;
-}) {
-  const searchParams = useSearchParams();
-  React.useEffect(() => {
-    setNextParam(searchParams.get("next") ?? "/");
-    if (searchParams.get("signin") === "1" && !user) openAuth();
-  }, [searchParams, user, setNextParam, openAuth]);
-  return null;
-}
-
 type NavItem = { label: string; type: "scroll" | "route"; target: string };
 
 const NAV: NavItem[] = [
@@ -38,16 +19,39 @@ const NAV: NavItem[] = [
   { label: "About", type: "route", target: "/about" },
 ];
 
+/**
+ * Reads ?signin=1 / ?next= from the URL and drives the auth modal.
+ * Isolated in its own component so it can sit inside <Suspense> — Next 16
+ * requires useSearchParams() to be Suspense-wrapped or it breaks static
+ * prerendering of pages that render the navbar.
+ */
+function AuthFromParams({
+  user,
+}: {
+  user: ReturnType<typeof useUser>["user"];
+}) {
+  const searchParams = useSearchParams();
+  const [authOpen, setAuthOpen] = React.useState(false);
+  const nextParam = searchParams.get("next") ?? "/";
+
+  React.useEffect(() => {
+    if (searchParams.get("signin") === "1" && !user) setAuthOpen(true);
+  }, [searchParams, user]);
+
+  return (
+    <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} next={nextParam} />
+  );
+}
+
 export function Navbar() {
   const [open, setOpen] = React.useState(false);
   const [authOpen, setAuthOpen] = React.useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const [nextParam, setNextParam] = React.useState("/");
   const leftRef = React.useRef<HTMLDivElement>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const router = useRouter();
-  const { user, role, loading } = useUser();
+  const { user, role, fullName, loading } = useUser();
   const isAdmin = role === "admin" || role === "super_admin";
 
   React.useEffect(() => {
@@ -85,17 +89,14 @@ export function Navbar() {
   }
 
   const initial =
-    user?.email?.[0]?.toUpperCase() ??
+    fullName?.[0]?.toUpperCase() ??
     user?.user_metadata?.name?.[0]?.toUpperCase() ??
+    user?.user_metadata?.full_name?.[0]?.toUpperCase() ??
+    user?.email?.[0]?.toUpperCase() ??
     "U";
-
-  const openAuth = React.useCallback(() => setAuthOpen(true), []);
 
   return (
     <>
-      <React.Suspense>
-        <SearchParamsSync user={user} setNextParam={setNextParam} openAuth={openAuth} />
-      </React.Suspense>
       <header className="pointer-events-none fixed inset-x-0 top-0 z-50 flex items-start justify-between p-4">
         {/* LEFT PILL */}
         <div ref={leftRef} className="pointer-events-auto">
@@ -202,11 +203,13 @@ export function Navbar() {
         </div>
       </header>
 
-      <AuthModal
-        open={authOpen}
-        onClose={() => setAuthOpen(false)}
-        next={nextParam}
-      />
+      {/* manual open (Sign In button) */}
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* URL-driven open (?signin=1) — Suspense-wrapped for useSearchParams */}
+      <React.Suspense fallback={null}>
+        <AuthFromParams user={user} />
+      </React.Suspense>
     </>
   );
 }

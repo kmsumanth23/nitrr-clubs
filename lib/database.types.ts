@@ -222,6 +222,7 @@ export type Database = {
           logo_url: string | null
           member_count: number | null
           name: string
+          recruitment_deadline: string | null
           slug: string
           tagline: string | null
           updated_at: string
@@ -240,6 +241,7 @@ export type Database = {
           logo_url?: string | null
           member_count?: number | null
           name: string
+          recruitment_deadline?: string | null
           slug: string
           tagline?: string | null
           updated_at?: string
@@ -258,6 +260,7 @@ export type Database = {
           logo_url?: string | null
           member_count?: number | null
           name?: string
+          recruitment_deadline?: string | null
           slug?: string
           tagline?: string | null
           updated_at?: string
