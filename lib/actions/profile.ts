@@ -2,15 +2,18 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/supabase__server";
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
 import { completeProfileSchema } from "@/lib/validation/profile";
 
-export type ProfileResult = { error?: string };
+export type ProfileResult = { error?: string; ok?: boolean };
 
 /**
- * Save the profile fields (used by /profile/complete). Updates the row the
- * signup trigger already created. RLS "profiles: update own" enforces id =
- * auth.uid(). Redirects to `next` (e.g. back to the apply form) on success.
+ * Save the profile fields (used by /profile/complete and the dashboard edit).
+ * Updates the row the signup trigger already created. RLS "profiles: update
+ * own" enforces id = auth.uid().
+ * If `next` is set, redirects to it (used by /profile/complete).
+ * Otherwise returns ok:true so the in-page edit form can flip out of edit mode.
  */
 export async function completeProfile(
   _prev: ProfileResult,
@@ -41,6 +44,10 @@ export async function completeProfile(
 
   revalidatePath("/profile");
 
-  const next = (formData.get("next") as string) || "/profile";
-  redirect(next);
+  const next = formData.get("next") as string | null;
+  if (next && next.startsWith("/")) redirect(next);
+  return { ok: true };
 }
+
+/** Aliased export the dashboard uses (same action). */
+export const updateProfile = completeProfile;

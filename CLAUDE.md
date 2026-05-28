@@ -6,175 +6,191 @@ Guidance for Claude Code working in this repo. Read this first.
 ## What this project is
 A full rebuild of the NIT Raipur (NITRR) clubs & committees website: a guide for
 new students to discover every active club, browse events and a photo gallery, and
-apply to clubs they like. Two user types: **students** and **admins** (club page
-managers). Replaces an old Create-React-App + Redux + static-HTML project.
+apply to clubs they like. Replaces an old Create-React-App + Redux + static-HTML
+project.
 
 Secondary goal: the owner is learning SWE/DevOps (HLD/LLD, SSR vs CSR, RLS, CI/CD)
-through this build. Prefer clear, conventional, well-structured code over clever code.
-Explanations in chat should be **terse** unless asked to expand.
+through this build. Prefer clear, conventional, well-structured code over clever
+code. Chat explanations should be **terse** unless asked to expand.
 
 ## Tech stack (locked)
-- **Next.js 16** App Router + **TypeScript**
-- **Tailwind CSS v4** with custom design tokens (no CSS-in-JS)
+- **Next.js 16** App Router + **TypeScript** (Turbopack default; middleware is
+  exported as `proxy` from `proxy.ts`)
+- **Tailwind CSS** with custom design tokens
 - **shadcn/ui** + Radix for accessible primitives
-- **Framer Motion** for animation (scroll reveals, flips)
-- **Supabase**: Postgres (data), Auth (email + Google OAuth, **no domain restriction**),
-  Storage (images)
+- **Framer Motion** for animation
+- **Supabase**: Postgres + Auth (email + Google OAuth; **no domain restriction**)
+  + Storage
 - **Postgres Row-Level Security** for authorization
-- **React Hook Form + Zod** for forms (validate same schema client + server)
-- **Vercel** hosting, **GitHub Actions** CI, ESLint + Prettier
+- **React Hook Form + Zod** for forms (same schema client + server)
+- **Vercel** hosting, **GitHub Actions** CI
+
+## Roles (locked at step 9)
+
+**Global role** (`profiles.role` enum): only `student` and `super_admin` are used.
+The enum still has `'admin'` for backwards compatibility but is no longer
+granted — authority comes from `club_admins` rows. (Postgres drops enum values
+painfully; we ignore the value instead of removing it.)
+
+**Per-club tiers** (`club_admins.admin_role`):
+- **lead** — full control of their club, can manage other admins (4th-year)
+- **manager** — content + events + gallery + applications, no admin mgmt (4th-year)
+- **editor** — content only (no applications, no admin mgmt) (3rd-year)
+
+Helper functions (defined in 09_roles.sql):
+- `club_tier(uuid)` → text, returns the tier on a club or null
+- `can_edit_club_content(uuid)` → editor+
+- `can_manage_applications(uuid)` → manager+
+- `can_manage_admins(uuid)` → lead only
+- `is_super_admin()` → boolean
+- `is_club_admin(uuid)` → kept as alias for `can_edit_club_content` (legacy)
+
+**Invariants enforced by triggers:**
+- A student cannot apply to a club they admin OR are already a member of
+  (`trg_block_self_apply` on `applications`).
+- A club must always have ≥1 lead — can't delete or demote the last lead
+  (`trg_protect_last_lead` on `club_admins`).
+
+**Workflow:** 4th-year leads run a club for the year, then hand off to incoming
+4th-year juniors. Super_admin only intervenes if a club is decommissioning
+(removes all admins, deletes the club).
+
+**Multi-club admins allowed.** Edge case: blocked from applying to clubs they manage.
+
+**Year-restricted positions are deferred** — for v1 apply is generic to the club.
+When implemented later, will add a `club_positions` table and reshape the apply
+flow.
 
 ## Architecture (HLD)
-Layers: shared layouts → page components (one per route) → reusable UI components →
-data layer (`lib/supabase` clients + typed query functions).
+Layers: shared layouts → page components → reusable UI → data layer
+(`lib/supabase` clients + typed query functions in `lib/queries/*`).
 
-Rendering strategy (decide per route — this is the SSR/CSR learning axis):
-- **SSG**: `/about`, `/faq` (rarely change)
-- **ISR**: `/`, `/clubs`, `/clubs/[slug]`, `/events` (shared data, periodic refresh)
-- **SSR**: `/profile`, `/admin/*` (depend on logged-in user — never cached)
-- **CSR islands**: filter pills, apply form, dashboards (interactive `"use client"`)
+Rendering strategy (per route):
+- **SSG**: `/about`, `/faq`
+- **ISR**: `/`, `/clubs`, `/clubs/[slug]`, `/events`, `/events/[slug]`, `/gallery`
+- **SSR**: `/profile`, `/admin/*`
+- **CSR islands**: filter pills, forms, dashboards, gallery lightbox, navbar
 
-Rule of thumb: *does the page depend on who's looking?* No → static (SSG/ISR).
-Yes → SSR. Interactivity within a page → Client Component island on a Server shell.
+Rule: *does the page depend on who's looking?* No → static (SSG/ISR). Yes → SSR.
+Interactive bits within a page → Client Component islands.
 
-## Route map (app/)
+## Route map
 ```
 app/
-  (marketing)/        # public, shares Navbar + Footer
-    page.tsx          # /            landing (10 sections)        [ISR]
-    clubs/page.tsx    # /clubs       list + filter pills          [ISR + CSR island]
-    clubs/[slug]/page.tsx                                          [ISR]
-    events/page.tsx   # /events                                   [ISR]
-    events/[slug]/page.tsx                                         [ISR]
-    gallery/page.tsx  # /gallery                                  [ISR]
-    about/page.tsx    /faq/page.tsx /contact/page.tsx             [SSG]
-  (auth)/             # minimal layout (sign-in is mostly a modal on /)
-    auth/callback/route.ts          # OAuth redirect handler
-    auth/signout/route.ts           # clears session, redirects home
+  (marketing)/        # public
+    page.tsx            # / landing (10 sections)         [ISR]
+    clubs/page.tsx, clubs/[slug]/page.tsx                   [ISR]
+    events/page.tsx, events/[slug]/page.tsx                 [ISR]
+    gallery/page.tsx                                         [ISR]
+  (auth)/             # modal-based; OAuth callback
+    auth/callback/route.ts
+    auth/signout/route.ts
   (student)/          # session-guarded
-    profile/page.tsx          # /profile, my applications         [SSR]
-    profile/complete/page.tsx # /profile/complete, for OAuth users missing fields [SSR]
-    clubs/[slug]/apply/page.tsx     # auth-gated apply flow       [SSR + CSR form]
-  (admin)/            # role-guarded (admin / super_admin)
-    admin/page.tsx and sub-pages: club, events, gallery, applications [SSR]
-  layout.tsx          # root: fonts + globals
-  not-found.tsx
-proxy.ts              # Next.js 16 equivalent of middleware.ts — refreshes Supabase session
+    profile/page.tsx                                         [SSR]
+    profile/complete/page.tsx                                [SSR]
+    clubs/[slug]/apply/page.tsx                              [SSR]
+  (admin)/            # club_admins-guarded (built at 9b)
+    admin/page.tsx and sub-pages
+  proxy.ts            # Supabase session refresh
 ```
-Route groups in `(parens)` don't affect the URL; they share a `layout.tsx`.
-Guards live in each group's `layout.tsx` (check session/role, redirect) — RLS is the
-second, database-level gate.
 
-## Landing page = 10 sections (scroll order)
-1. Frosted split-pill nav (sticky). Left pill: logo (→home) + hamburger that expands
-   rightward to Home/Clubs/Events/Gallery/About. Right pill: Sign In → centered modal.
-2. Hero — photo mosaic + "NITRR Clubs." wordmark + Browse CTA.
-3. Stats capsule strip — counts (computed via Supabase COUNT later).
-4. Explore clubs — CSS flip cards (photo front; dark back w/ 3-4 `highlights`),
-   tagline "Where do you belong?". Logged-out users also see "How it works" here;
-   logged-in users reach it from the navbar.
-5. How it works — 3 steps discover → explore → apply.
-6. Events — 5 fanned poster cards.
-7. Gallery — "MOMENTS" two-row marquee (opposite directions, pause on hover) + View Gallery.
-8. Social handles.
-9. FAQ accordion (reused on /faq).
-10. Final CTA band + dark footer (only dark section).
+## Landing page (10 sections in scroll order)
+1. Frosted split-pill nav (sticky). 2. Hero + Stats (one full-screen unit).
+3. (merged into hero) 4. Explore clubs (fade-frost hover, 5 cards + All-Clubs).
+5. How it works (3 steps). 6. Events (5 upright graduated posters, hover tilt).
+7. Gallery MOMENTS (3 film strips, sprocket holes). 8. Socials. 9. FAQ.
+10. Final CTA + dark footer.
 
 ## Design system
-Tokens live in `tailwind.config.ts` + `app/globals.css` (CSS vars).
-- Surfaces: cream `#F7F3EC` (bg), beige `#F0EAE0`, line `#E4DCCF`
-- Text: ink `#1C1A17`, ink-soft `#6B6459`
-- Primary action: **indigo `#5B52E0`** (`bg-indigo text-indigo-fg`)
-- Warm accent: **terracotta/clay `#C26A4A`** (placeholder; may swap to honey `#E0A82E`
-  or sage `#7C8C6A` — change the `clay` token only)
-- Fonts: **Bricolage Grotesque** (display, `font-display`) + **Geist Sans** (body, `font-sans`)
-- Aesthetic: frosted-glass pill nav, rounded cards, heavy display type, gentle warm
-  section rhythm, only the footer is dark. Respect `prefers-reduced-motion`.
+Tokens in `tailwind.config.ts` + `app/globals.css`.
+- Surfaces: cream #F7F3EC, beige #F0EAE0, line #E4DCCF
+- Text: ink #1C1A17, ink-soft #6B6459
+- Primary: **indigo #5B52E0**
+- Warm accent: **clay #C26A4A** (placeholder; may swap to honey/sage later)
+- Fonts: **Bricolage Grotesque** (display) + **Geist Sans** (body)
+- Animation respects `prefers-reduced-motion`
+- Full-screen sections use `min-h-[100svh]` (mobile-safe vh)
 
-## Database (schema is a living doc; see supabase/*.sql)
-`clubs` is the central hub; most tables FK to it via `club_id`.
-Tables: `profiles` (extends `auth.users`; `role` enum student/admin/super_admin;
-  extra columns: `roll_number text`, `gender text` — added via migration),
-`categories`, `clubs` (slug, category_id, highlights[], is_recruiting),
-`club_admins` (AUTHORIZATION: who may edit a club — many-to-many),
-`club_team` (DISPLAY-ONLY coordinators; may have no account),
-`events` (club_id), `applications` (club_id+profile_id unique, status enum,
-`responses` jsonb for per-club questions), `gallery_photos` (club_id + optional event_id),
-`faqs` (standalone).
-RLS pattern: content tables = public read, writes restricted to club admins
-(`is_club_admin(club_id)`) or `is_super_admin()`. `applications` = student sees/creates
-own; club admin sees/updates applications for clubs they manage. Helper SQL functions:
-`is_club_admin(uuid)`, `is_super_admin()`.
+## Database (living doc; see supabase/*.sql)
+Hub: **clubs**. Tables:
+- `profiles` (extends auth.users; role enum, branch, year, roll_number, gender)
+- `categories` (Tech / Sports / Arts / Social / Professional / Culture)
+- `clubs` (slug, category_id, highlights[], is_recruiting, updated_by)
+- `club_admins` (authorization join: club_id + profile_id + admin_role tier)
+- `club_team` (display-only coordinators; may have no account)
+- `club_members` (the roster — created on application acceptance) [9a]
+- `events` (club_id, slug, starts_at, reg_open, reg_url, updated_by)
+- `applications` (club_id + profile_id unique, status enum, `responses` jsonb)
+- `gallery_photos` (club_id + optional event_id)
+- `faqs` (standalone)
+
+RLS pattern: content tables = public read; writes gated by tier helpers.
+Applications = student sees/inserts/updates own; manager+ reads/updates club's.
 
 ### Types workflow
 `lib/database.types.ts` is auto-generated — never hand-edit the main body.
 When adding a column: (1) run SQL migration, (2) run
 `npx supabase gen types typescript --project-id <id> > lib/database.types.ts`,
-(3) re-append the convenience alias block at the bottom of the file (the
-`export type Club = ...` lines). The TS types are a mirror of Postgres — if they
-drift, writes silently drop unknown fields with no compile error.
+(3) re-append the convenience alias block at the bottom of the file.
 
 ### Google OAuth users
 OAuth users bypass the sign-up form and have `roll_number/branch/gender = null`.
-`/profile/complete` exists for them to fill in missing fields. Future: redirect
-there automatically on first login by checking `roll_number IS NULL` in the
-`(student)` layout guard.
+`/profile/complete` exists for them to fill in missing fields.
 
 ## Conventions
-- Path alias `@/*` → project root. Imports: `@/lib/...`, `@/components/...`.
-- Supabase clients — actual files use double-underscore names; `tsconfig.json` has
-  aliases so both forms resolve correctly:
-  - `@/lib/supabase/client` → `supabase__client.ts` (Client Components, browser)
-  - `@/lib/supabase/server` → `supabase__server.ts` (Server Components, actions, route handlers)
-  - `supabase__middleware.ts` — used only by `proxy.ts`
-  - `supabase__static.ts` — cookie-free client for `generateStaticParams` (build time)
-  - Never use the service-role key in client code.
-- Data access: write typed query functions in `lib/queries/*` — pages call those,
-  not raw Supabase inline, so logic stays testable.
-- Types from `@/lib/database.types` (`Club`, `EventRow`, `Profile`, ...).
-- Forms: Zod schema in `lib/validation/*`, shared by RHF (client) and the server action.
-- Server Components by default; add `"use client"` only for interactivity (flips,
-  marquee, filters, forms, modal).
-- Auth tokens live in httpOnly cookies via `@supabase/ssr` — never localStorage.
-- No secrets in the repo. `.env.local` is gitignored; template is `.env.local.example`.
-- Don't commit the `build/`/`.next/` output. Run `npm run lint` + `prettier` before commits.
-- `generateStaticParams` must use `supabase__static.ts` — `supabase__server.ts` calls
-  `cookies()` which throws at build time.
+- Path alias `@/*` → project root.
+- Supabase clients: `@/lib/supabase/client` (Client), `@/lib/supabase/server`
+  (Server / actions / route handlers). Both are tsconfig aliases — actual files
+  use double-underscore names (`supabase__server.ts`, `supabase__client.ts`).
+  `supabase__static.ts` — cookie-free client for `generateStaticParams` (build time).
+  Never use service-role key in client code.
+- Queries in `lib/queries/*` — pages call those, not raw Supabase inline.
+- Forms: Zod in `lib/validation/*`, shared by RHF (client) + server action.
+- Server Components by default; `"use client"` only for interactivity.
+- Tokens in httpOnly cookies via `@supabase/ssr` (never localStorage).
+- React 19 / Next 16: use `useActionState` (from `react`), NOT `useFormState`
+  (deprecated; in `react-dom`).
+- `useSearchParams()` must be in a component wrapped in `<Suspense>` — bare usage
+  in a layout/page blocks static rendering for every route that includes it.
+- File-creation gotcha: reserved names (`page.tsx`, `layout.tsx`, `route.ts`,
+  `proxy.ts`) MUST be exact. Component/helper files can be any name.
 
-## Things to NOT do (mistakes from the old project)
-- No per-club hardcoded HTML pages — one `/clubs/[slug]` template fed by the DB.
-- No data hardcoded into presentation — content comes from Supabase.
-- No Redux. Auth/session via Supabase + cookies.
-- No tokens in localStorage. No committed build artifacts. No inline-style soup.
+## Things to NOT do
+- No per-club hardcoded HTML — `/clubs/[slug]` template fed by the DB.
+- No Redux. No localStorage tokens. No committed build artifacts.
+- No inline style soup. Use Tailwind + tokens.
 
-## Build order (progress)
-1. ✅ Scaffold + tooling (Next.js 16, TS, Tailwind v4 tokens, fonts, ESLint/Prettier)
-2. ✅ Supabase: schema SQL, RLS, seed, client/server/middleware helpers, types
-3. ✅ Design system + nav + footer (shared shell, UI primitives)
-4. ✅ Landing page — all 10 sections wired to Supabase (ISR, revalidate=60)
-5. ✅ Clubs: /clubs list + filter pills, /clubs/[slug] detail (ISR + generateStaticParams)
-6. ✅ Auth: sign-in/up modal + Google OAuth + callback + signout + route guards
-          Full sign-up form: name, email, password, roll number, branch, year, gender
-          Email confirmation disabled for dev (toggle in Supabase dashboard, no code change)
-7. ✅ Apply flow: /clubs/[slug]/apply page + Zod schema + server action (RLS write)
-          /profile/complete page for OAuth users missing profile fields
-8. ⬜ Events + Gallery full pages
-9. ⬜ Admin dashboard (club content, events, photos, application review)
-10. ⬜ Deploy: Vercel + GitHub Actions CI
+## Build progress
+1. ✅ Scaffold + tooling
+2. ✅ Supabase: schema (01), RLS (02), seed (03), clients/middleware/types
+3. ✅ Design system + nav + footer
+4. ✅ Landing page (10 sections wired to Supabase)
+5. ✅ Clubs: /clubs list + filter, /clubs/[slug] detail
+6. ✅ Auth: modal + Google OAuth + callback + session-aware navbar + guards
+7. ✅ Apply flow: form + Zod + server action (RLS write) + profile completeness
+8. ✅ Events + Gallery pages (+ apply sign-in flow fix)
+9.  ⬜ Admin/Student dashboards — split into:
+    - 9a ✅ Student profile/dashboard (+ 09_roles.sql migration)
+    - 9b ⬜ Admin shell + edit club content (uses tier helpers)
+    - 9c ⬜ Admin events management (CRUD)
+    - 9d ⬜ Admin applications review (accept → creates club_members row)
+    - 9e ⬜ Admin gallery upload (Supabase Storage + image resize)
+10. ⬜ Email notifications (Resend or similar; accept/reject emails)
+11. ⬜ Year-restricted positions (`club_positions` table + apply reshape)
+12. ⬜ Super-admin dashboard (create clubs, assign first lead, decommission)
+13. ⬜ Deploy: Vercel + GitHub Actions CI
 
 ## Commands
 ```bash
-npm run dev      # local dev (http://localhost:3000)
-npm run build    # production build
+npm run dev      # local
+npm run build    # prod build
 npm run lint     # eslint
-npx prettier -w .   # format
+npx prettier -w .
 ```
 
 ## Supabase setup recap
-SQL in `supabase/` runs in order: 01_schema → 02_rls → 03_seed (Supabase SQL editor).
-Env vars in `.env.local` (URL, anon key, service-role key). Google OAuth redirect:
-`http://localhost:3000/auth/callback` (+ Vercel URL in prod).
-
-After running schema SQL, also grant table privileges to the `anon` and `authenticated`
-roles (not done automatically via raw SQL — see the grant statements in project history).
-Without these, all queries return 42501 even with correct RLS policies.
+SQL in order: 01_schema → 02_rls → 03_seed → (9a) 09_roles.
+Env vars in `.env.local`. Google OAuth redirect: `.../auth/callback`.
+After running schema SQL, grant table privileges to `anon` and `authenticated`
+roles — not done automatically via raw SQL. Without this, all queries return
+42501 even with correct RLS policies.

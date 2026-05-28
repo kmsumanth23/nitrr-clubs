@@ -131,6 +131,42 @@ export type Database = {
           },
         ]
       }
+      club_members: {
+        Row: {
+          club_id: string
+          id: string
+          joined_at: string
+          profile_id: string
+        }
+        Insert: {
+          club_id: string
+          id?: string
+          joined_at?: string
+          profile_id: string
+        }
+        Update: {
+          club_id?: string
+          id?: string
+          joined_at?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "club_members_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_members_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       club_team: {
         Row: {
           club_id: string
@@ -189,6 +225,7 @@ export type Database = {
           slug: string
           tagline: string | null
           updated_at: string
+          updated_by: string | null
         }
         Insert: {
           category_id?: string | null
@@ -206,6 +243,7 @@ export type Database = {
           slug: string
           tagline?: string | null
           updated_at?: string
+          updated_by?: string | null
         }
         Update: {
           category_id?: string | null
@@ -223,6 +261,7 @@ export type Database = {
           slug?: string
           tagline?: string | null
           updated_at?: string
+          updated_by?: string | null
         }
         Relationships: [
           {
@@ -230,6 +269,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clubs_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -248,6 +294,7 @@ export type Database = {
           starts_at: string | null
           title: string
           updated_at: string
+          updated_by: string | null
           venue: string | null
         }
         Insert: {
@@ -263,6 +310,7 @@ export type Database = {
           starts_at?: string | null
           title: string
           updated_at?: string
+          updated_by?: string | null
           venue?: string | null
         }
         Update: {
@@ -278,6 +326,7 @@ export type Database = {
           starts_at?: string | null
           title?: string
           updated_at?: string
+          updated_by?: string | null
           venue?: string | null
         }
         Relationships: [
@@ -286,6 +335,13 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "events_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -409,6 +465,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_edit_club_content: { Args: { target_club: string }; Returns: boolean }
+      can_manage_admins: { Args: { target_club: string }; Returns: boolean }
+      can_manage_applications: {
+        Args: { target_club: string }
+        Returns: boolean
+      }
+      club_tier: { Args: { target_club: string }; Returns: string }
       is_club_admin: { Args: { target_club: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
     }
@@ -571,3 +634,7 @@ export type EventRow = Database["public"]["Tables"]["events"]["Row"]
 export type Application = Database["public"]["Tables"]["applications"]["Row"]
 export type GalleryPhoto = Database["public"]["Tables"]["gallery_photos"]["Row"]
 export type Faq = Database["public"]["Tables"]["faqs"]["Row"]
+
+// --- hand-appended aliases (re-add after each regen) ---
+export type ClubMember = Database["public"]["Tables"]["club_members"]["Row"];
+export type AdminTier = "lead" | "manager" | "editor";
