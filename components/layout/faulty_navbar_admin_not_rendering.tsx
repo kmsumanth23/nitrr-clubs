@@ -51,8 +51,8 @@ export function Navbar() {
   const menuRef = React.useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const router = useRouter();
-  const { user, role, fullName, isClubAdmin, loading } = useUser();
-  const showAdminLink = isClubAdmin || role === "super_admin";
+  const { user, role, fullName, loading } = useUser();
+  const isAdmin = role === "admin" || role === "super_admin";
 
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -175,7 +175,7 @@ export function Navbar() {
                   >
                     <IconUser size={16} /> Profile
                   </Link>
-                  {showAdminLink && (
+                  {isAdmin && (
                     <Link
                       href="/admin"
                       onClick={() => setMenuOpen(false)}

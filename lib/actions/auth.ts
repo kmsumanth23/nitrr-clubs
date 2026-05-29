@@ -35,7 +35,8 @@ export async function signInWithPassword(
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) return { error: error.message };
 
-  redirect(safeNext(formData));
+  const next = safeNext(formData);
+  redirect(`/profile/complete?next=${encodeURIComponent(next)}`);
 }
 
 /** Email + password sign up. */
@@ -55,7 +56,8 @@ export async function signUp(
   const { error } = await supabase.auth.signUp(parsed.data);
   if (error) return { error: error.message };
 
-  redirect(safeNext(formData));
+  const next = safeNext(formData);
+  redirect(`/profile/complete?next=${encodeURIComponent(next)}`);
 }
 
 /** Begin Google OAuth — returns the URL to redirect the browser to. */

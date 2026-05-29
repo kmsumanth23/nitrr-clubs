@@ -29,8 +29,22 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-## Deploy on Vercel
+## Deploy on Vercel 
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+my memory:
+
+## club lead should also have the change log for there club 
+a json file change log which shows who edited what including them
+
+come up with a plan to assigne the admins access
+
+the name when updated is not updated on the authenication table
+
+add a year update prompt every year
+
+super admin must be able to add or remove admins through web only by using email addresses or roll numbers or any other unique vars

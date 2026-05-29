@@ -171,7 +171,7 @@ OAuth users bypass the sign-up form and have `roll_number/branch/gender = null`.
 8. ✅ Events + Gallery pages (+ apply sign-in flow fix)
 9.  ⬜ Admin/Student dashboards — split into:
     - 9a ✅ Student profile/dashboard (+ 09_roles.sql migration)
-    - 9b ⬜ Admin shell + edit club content (uses tier helpers)
+    - 9b ✅ Admin shell + edit club content (uses tier helpers)
     - 9c ⬜ Admin events management (CRUD)
     - 9d ⬜ Admin applications review (accept → creates club_members row)
     - 9e ⬜ Admin gallery upload (Supabase Storage + image resize)

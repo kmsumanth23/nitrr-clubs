@@ -9,19 +9,23 @@ interface UserState {
   user: User | null;
   role: UserRole | null;
   fullName: string | null;
+  /** True if the user has at least one row in club_admins. */
+  isClubAdmin: boolean;
   loading: boolean;
 }
 
 /**
- * Reads the current auth user + their profile (role, full_name) on the client,
- * staying in sync via onAuthStateChange. Used by the navbar (avatar initial
- * comes from full_name).
+ * Reads the current auth user + profile (role, name) on the client, and also
+ * checks whether they're a club admin (any row in club_admins). The navbar
+ * uses isClubAdmin OR super_admin to show the "Admin" link, since global role
+ * is no longer the authority — club_admins membership is.
  */
 export function useUser(): UserState {
   const [state, setState] = React.useState<UserState>({
     user: null,
     role: null,
     fullName: null,
+    isClubAdmin: false,
     loading: true,
   });
 
@@ -32,19 +36,32 @@ export function useUser(): UserState {
     async function load(user: User | null) {
       if (!user) {
         if (active)
-          setState({ user: null, role: null, fullName: null, loading: false });
+          setState({
+            user: null,
+            role: null,
+            fullName: null,
+            isClubAdmin: false,
+            loading: false,
+          });
         return;
       }
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role, full_name")
-        .eq("id", user.id)
-        .maybeSingle();
+      const [{ data: profile }, { count }] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("role, full_name")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("club_admins")
+          .select("*", { count: "exact", head: true })
+          .eq("profile_id", user.id),
+      ]);
       if (active)
         setState({
           user,
           role: (profile?.role as UserRole) ?? "student",
           fullName: profile?.full_name ?? null,
+          isClubAdmin: (count ?? 0) > 0,
           loading: false,
         });
     }

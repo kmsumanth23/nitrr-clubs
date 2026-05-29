@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/supabase__server";
 import { CompleteProfileForm } from "@/components/profile/complete-profile-form";
 
@@ -19,6 +20,11 @@ export default async function CompleteProfilePage({
     .select("full_name, roll_number, year, branch, gender")
     .eq("id", user!.id)
     .maybeSingle();
+
+  // Profile already complete — skip straight to destination.
+  if (profile?.roll_number && profile?.branch && profile?.year) {
+    redirect(next && next.startsWith("/") ? next : "/profile");
+  }
 
   return (
     <section className="mx-auto max-w-md px-6 pb-20 pt-28">

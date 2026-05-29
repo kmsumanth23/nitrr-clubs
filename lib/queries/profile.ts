@@ -37,14 +37,24 @@ export async function getMyProfile(): Promise<Profile | null> {
   return (data as Profile) ?? null;
 }
 
-/** All my applications, newest first. RLS limits to the current user. */
+/**
+ * Strictly MY applications. Explicit profile_id filter — don't rely on RLS
+ * alone, because admins/super_admin can read other applications via the
+ * "admin read club" policy. The /profile page must show only the caller's own.
+ */
 export async function getMyApplications(): Promise<MyApplication[]> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
   const { data, error } = await supabase
     .from("applications")
     .select(
       "*, club:clubs(name, slug, recruitment_deadline, category:categories(*))",
     )
+    .eq("profile_id", user.id)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as MyApplication[];
