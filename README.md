@@ -50,3 +50,5 @@ add a year update prompt every year
 super admin must be able to add or remove admins through web only by using email addresses or roll numbers or any other unique vars
 
 make sure future db access are through authenticated users
+
+active members must be auto

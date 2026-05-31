@@ -1,12 +1,15 @@
 import { redirect } from "next/navigation";
 import { Navbar } from "@/components/layout/navbar";
-import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { AdminShell } from "@/components/admin/admin-shell";
 import { createClient } from "@/lib/supabase/server";
+import { getMyAdminClubs } from "@/lib/queries/admin";
 
 /**
- * GUARD (gate 1 of 2): admin access = "is the user in any club_admins row
- * OR is a super_admin?" No longer role-enum-based.
- * RLS is the second gate on every actual write/read.
+ * GUARD (gate 1 of 2): admin access = super_admin OR any club_admins row.
+ *
+ * Sidebar shows only on /admin/clubs/<slug>/... — handled inside AdminShell,
+ * which reads the pathname client-side. The layout fetches the user's clubs
+ * once and hands them down (used for the "Switch club" picker).
  */
 export default async function AdminLayout({
   children,
@@ -19,7 +22,6 @@ export default async function AdminLayout({
   } = await supabase.auth.getUser();
   if (!user) redirect("/?signin=1");
 
-  // super_admin OR any club_admins row
   const [{ data: profile }, { count: adminCount }] = await Promise.all([
     supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
     supabase
@@ -32,14 +34,22 @@ export default async function AdminLayout({
   const isClubAdmin = (adminCount ?? 0) > 0;
   if (!isSuper && !isClubAdmin) redirect("/");
 
+  // Clubs the user manages — fed to the sidebar's "Switch club" picker.
+  const myClubs = await getMyAdminClubs();
+
   return (
     <>
       <Navbar />
       <div className="min-h-screen bg-cream pt-24">
-        <div className="mx-auto flex max-w-6xl gap-6 px-6 pb-20">
-          <AdminSidebar isSuper={isSuper} />
-          <main className="flex-1 min-w-0">{children}</main>
-        </div>
+        <AdminShell
+          clubs={myClubs.map((c) => ({
+            slug: c.slug,
+            name: c.name,
+            tier: c.tier,
+          }))}
+        >
+          {children}
+        </AdminShell>
       </div>
     </>
   );

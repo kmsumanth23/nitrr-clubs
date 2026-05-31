@@ -18,7 +18,13 @@ export interface AdminClub {
   pending_applications: number | null; // null for editors (can't see)
 }
 
-/** Clubs the current user manages, with their tier on each + quick stats. */
+/**
+ * Clubs the current user manages, with their tier on each + quick stats.
+ *
+ * Super_admin: returns ALL clubs as if 'lead' (super_admin can do anything,
+ * so showing the dashboard scoped to "all clubs at lead tier" is correct).
+ * Other users: scoped to their club_admins rows.
+ */
 export async function getMyAdminClubs(): Promise<AdminClub[]> {
   const supabase = await createClient();
   const {
@@ -26,32 +32,57 @@ export async function getMyAdminClubs(): Promise<AdminClub[]> {
   } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data: rows, error } = await supabase
-    .from("club_admins")
-    .select(
-      "admin_role, club:clubs(id, slug, name, member_count, is_recruiting, recruitment_deadline, category:categories(*))",
-    )
-    .eq("profile_id", user.id);
-  if (error) throw error;
-  if (!rows) return [];
+  // Determine global role
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  const isSuper = profile?.role === "super_admin";
 
-  // For each club, fetch quick stats in parallel.
+  type Row = {
+    tier: AdminTier;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    club: any;
+  };
+  let rows: Row[] = [];
+
+  if (isSuper) {
+    // every club, treated as lead
+    const { data, error } = await supabase
+      .from("clubs")
+      .select(
+        "id, slug, name, member_count, is_recruiting, recruitment_deadline, category:categories(*)",
+      )
+      .order("name");
+    if (error) throw error;
+    rows = (data ?? []).map((c) => ({ tier: "lead" as AdminTier, club: c }));
+  } else {
+    const { data, error } = await supabase
+      .from("club_admins")
+      .select(
+        "admin_role, club:clubs(id, slug, name, member_count, is_recruiting, recruitment_deadline, category:categories(*))",
+      )
+      .eq("profile_id", user.id);
+    if (error) throw error;
+    rows = (data ?? [])
+      .map((r) => ({
+        tier: r.admin_role as AdminTier,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        club: (r as any).club,
+      }))
+      .filter((r) => r.club);
+  }
+
   const enriched = await Promise.all(
-    rows.map(async (row) => {
-      // joined relation is named "club"
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const club: any = row.club;
-      if (!club) return null;
-
-      const tier = row.admin_role as AdminTier;
-
+    rows.map(async ({ tier, club }) => {
       const [{ count: evCount }, appsCount] = await Promise.all([
         supabase
           .from("events")
           .select("*", { count: "exact", head: true })
           .eq("club_id", club.id)
           .gt("starts_at", new Date().toISOString()),
-        // editors can't read applications (RLS), so skip the count for them
+        // editors can't read applications via RLS; skip the count
         tier === "editor"
           ? Promise.resolve({ count: null as number | null })
           : supabase
@@ -76,10 +107,13 @@ export async function getMyAdminClubs(): Promise<AdminClub[]> {
     }),
   );
 
-  return enriched.filter(Boolean) as AdminClub[];
+  return enriched;
 }
 
-/** A club + its category for the edit page. Verifies the user can edit it. */
+/**
+ * A club + its category for the edit page. Verifies the user can edit it.
+ * Super_admin can edit any club (returned tier='lead').
+ */
 export async function getEditableClub(
   slug: string,
 ): Promise<{ club: Club; category: Category | null; tier: AdminTier } | null> {
@@ -96,13 +130,26 @@ export async function getEditableClub(
     .maybeSingle();
   if (!club) return null;
 
+  // Super_admin? full access
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profile?.role === "super_admin") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c: any = club;
+    return { club: c as Club, category: c.category ?? null, tier: "lead" };
+  }
+
+  // Otherwise must be in club_admins for this club
   const { data: adminRow } = await supabase
     .from("club_admins")
     .select("admin_role")
     .eq("club_id", club.id)
     .eq("profile_id", user.id)
     .maybeSingle();
-  if (!adminRow) return null; // user isn't an admin of this club
+  if (!adminRow) return null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const c: any = club;
