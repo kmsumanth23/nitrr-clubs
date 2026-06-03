@@ -20,6 +20,8 @@ export type Database = {
           created_at: string
           id: string
           note: string | null
+          note_at: string | null
+          note_by: string | null
           profile_id: string
           responses: Json
           status: Database["public"]["Enums"]["application_status"]
@@ -30,6 +32,8 @@ export type Database = {
           created_at?: string
           id?: string
           note?: string | null
+          note_at?: string | null
+          note_by?: string | null
           profile_id: string
           responses?: Json
           status?: Database["public"]["Enums"]["application_status"]
@@ -40,6 +44,8 @@ export type Database = {
           created_at?: string
           id?: string
           note?: string | null
+          note_at?: string | null
+          note_by?: string | null
           profile_id?: string
           responses?: Json
           status?: Database["public"]["Enums"]["application_status"]
@@ -51,6 +57,13 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "applications_note_by_fkey"
+            columns: ["note_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -223,6 +236,9 @@ export type Database = {
           member_count: number | null
           name: string
           recruitment_deadline: string | null
+          result_date: string | null
+          results_published_at: string | null
+          results_published_by: string | null
           slug: string
           tagline: string | null
           updated_at: string
@@ -242,6 +258,9 @@ export type Database = {
           member_count?: number | null
           name: string
           recruitment_deadline?: string | null
+          result_date?: string | null
+          results_published_at?: string | null
+          results_published_by?: string | null
           slug: string
           tagline?: string | null
           updated_at?: string
@@ -261,6 +280,9 @@ export type Database = {
           member_count?: number | null
           name?: string
           recruitment_deadline?: string | null
+          result_date?: string | null
+          results_published_at?: string | null
+          results_published_by?: string | null
           slug?: string
           tagline?: string | null
           updated_at?: string
@@ -272,6 +294,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "clubs_results_published_by_fkey"
+            columns: ["results_published_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -474,9 +503,11 @@ export type Database = {
         Args: { target_club: string }
         Returns: boolean
       }
+      club_phase: { Args: { club_id_in: string }; Returns: string }
       club_tier: { Args: { target_club: string }; Returns: string }
       is_club_admin: { Args: { target_club: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
+      publish_club_results: { Args: { club_id_in: string }; Returns: undefined }
     }
     Enums: {
       application_status:
@@ -485,6 +516,7 @@ export type Database = {
         | "accepted"
         | "rejected"
         | "withdrawn"
+        | "removed"
       user_role: "student" | "admin" | "super_admin"
     }
     CompositeTypes: {
@@ -619,6 +651,7 @@ export const Constants = {
         "accepted",
         "rejected",
         "withdrawn",
+        "removed",
       ],
       user_role: ["student", "admin", "super_admin"],
     },

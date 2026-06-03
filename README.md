@@ -52,3 +52,41 @@ super admin must be able to add or remove admins through web only by using email
 make sure future db access are through authenticated users
 
 active members must be auto
+
+plan out the application review process like meet links and all
+
+try whatsapp intigration using mobile numbers
+
+1. My Clubs page (2026-05-27)
+A button/page for logged-in users to view clubs they've applied to or joined. Likely a tab on /profile or a separate /profile/my-clubs page. Query applications + club_members filtered by profile_id.
+
+2. Recruiter Meet Link (2026-05-27)
+Club admins can attach a Google Meet link to an application during review. Student sees it on their profile when status is reviewing. Needs a meet_link column on applications (or in the responses jsonb). Could tie into step 10 (email notifications).
+
+3. Welcome Back Pill (2026-05-29)
+Animated pill next to the profile avatar after login — says "Welcome back" and fades out after ~3 seconds. Detect !user → user transition in Navbar, render with CSS fade-out animation, clear via setTimeout.
+
+4. Post-Deploy Claude Analysis (2026-05-28)
+After step 13 (deploy), run a full Claude Code analysis pass: a11y, performance, UX flows, code quality.
+
+5. use roll number to verify user there can never exist 2 users with same roll number.
+
+6. add a search baar to admin dashboard we can copy it from the clubs page 
+
+club member count must be automatic
+
+application history
+
+side bar c for switch clubs
+
+assign club managers for recrutment 
+
+review history should also be maintained who accepted rejected or put the app in review of that student just like notes history
+
+note history is global with respct to club and recruit 
+
+even when there are no applications the publish result is shown fix that
+
+manager should be able to get the list of all the members in the club.
+
+super admins should also have ability to create clubs

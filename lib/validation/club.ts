@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Editable club fields. is_recruiting + deadline can be tweaked by leads/managers. */
+/** Editable club fields. Now includes result_date alongside recruitment_deadline. */
 export const clubEditSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(2, "Name is required").max(120),
@@ -10,6 +10,7 @@ export const clubEditSchema = z.object({
   highlights: z.array(z.string().min(2).max(80)).max(8).default([]),
   is_recruiting: z.boolean().default(true),
   recruitment_deadline: z.string().datetime().nullable().optional(),
+  result_date: z.string().datetime().nullable().optional(),
   member_count: z.coerce.number().int().min(0).max(100000).nullable().optional(),
   instagram_url: z.string().url().nullable().optional().or(z.literal("")),
   linkedin_url: z.string().url().nullable().optional().or(z.literal("")),

@@ -6,15 +6,11 @@ import { clubEditSchema } from "@/lib/validation/club";
 
 export type ClubEditResult = { error?: string; ok?: boolean };
 
-/**
- * Update club content. Anyone with a row in club_admins for this club
- * (editor+) can edit content — RLS enforces it. Stamps updated_by for audit.
- */
+/** Update club content + recruitment/result dates. Stamps updated_by. */
 export async function updateClub(
   _prev: ClubEditResult,
   formData: FormData,
 ): Promise<ClubEditResult> {
-  // collect highlight fields (highlights__0, highlights__1, ...)
   const highlights: string[] = [];
   for (const [key, value] of formData.entries()) {
     if (key.startsWith("highlights__") && typeof value === "string" && value.trim()) {
@@ -23,11 +19,14 @@ export async function updateClub(
   }
 
   const deadlineRaw = formData.get("recruitment_deadline") as string | null;
-  // datetime-local gives "YYYY-MM-DDTHH:mm" with no zone; treat as local time
   const deadlineIso =
     deadlineRaw && deadlineRaw.length > 0
       ? new Date(deadlineRaw).toISOString()
       : null;
+
+  const resultRaw = formData.get("result_date") as string | null;
+  const resultIso =
+    resultRaw && resultRaw.length > 0 ? new Date(resultRaw).toISOString() : null;
 
   const parsed = clubEditSchema.safeParse({
     id: formData.get("id"),
@@ -38,12 +37,21 @@ export async function updateClub(
     highlights,
     is_recruiting: formData.get("is_recruiting") === "on",
     recruitment_deadline: deadlineIso,
+    result_date: resultIso,
     member_count: formData.get("member_count"),
     instagram_url: nullable(formData.get("instagram_url")),
     linkedin_url: nullable(formData.get("linkedin_url")),
   });
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0].message };
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  // sanity: result_date should be at/after deadline if both set
+  if (parsed.data.recruitment_deadline && parsed.data.result_date) {
+    if (
+      new Date(parsed.data.result_date) <
+      new Date(parsed.data.recruitment_deadline)
+    ) {
+      return { error: "Result date cannot be before the deadline." };
+    }
   }
 
   const { id, ...patch } = parsed.data;
@@ -59,12 +67,10 @@ export async function updateClub(
     .eq("id", id);
   if (error) return { error: error.message };
 
-  // bust ISR caches for the public pages this club appears on
   revalidatePath("/");
   revalidatePath("/clubs");
-  // (slug may have changed in theory, but our schema makes slug immutable here)
   revalidatePath(`/clubs/${parsed.data.name.toLowerCase().replace(/\s+/g, "-")}`);
-
+  revalidatePath("/profile");
   return { ok: true };
 }
 

@@ -139,7 +139,13 @@ export function AdminSidebar({
                 </span>
               </button>
               {switchOpen && (
-                <div className="absolute left-full top-0 ml-2 w-48 overflow-hidden rounded-2xl border border-line bg-white py-1 shadow-soft">
+                <div
+                  className="fixed z-[60] w-56 max-h-[60vh] overflow-y-auto rounded-2xl border border-line bg-white py-1 shadow-soft"
+                  style={{
+                    left: (switchRef.current?.getBoundingClientRect().right ?? 0) + 8,
+                    top: switchRef.current?.getBoundingClientRect().top ?? 0,
+                  }}
+                >
                   {myClubs.map((c) => (
                     <Link
                       key={c.slug}

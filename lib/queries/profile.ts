@@ -8,7 +8,14 @@ import type {
 
 export interface MyApplication extends Application {
   club:
-    | (Pick<Club, "name" | "slug" | "recruitment_deadline"> & {
+    | (Pick<
+        Club,
+        "name" | "slug" | "recruitment_deadline"
+      > & {
+        // these are on the clubs table after 09b migration; cast in code
+        // until types are regenerated
+        result_date?: string | null;
+        results_published_at?: string | null;
         category: Category | null;
       })
     | null;
@@ -20,7 +27,7 @@ export interface MyMembership {
   club: (Pick<Club, "name" | "slug"> & { category: Category | null }) | null;
 }
 
-/** The current user's profile row, or null. */
+/** Current user's profile row, or null. */
 export async function getMyProfile(): Promise<Profile | null> {
   const supabase = await createClient();
   const {
@@ -39,8 +46,8 @@ export async function getMyProfile(): Promise<Profile | null> {
 
 /**
  * Strictly MY applications. Explicit profile_id filter — don't rely on RLS
- * alone, because admins/super_admin can read other applications via the
- * "admin read club" policy. The /profile page must show only the caller's own.
+ * alone (the 9a leak lesson). Includes phase fields on the club join so the
+ * row can hide decisions during the review phase.
  */
 export async function getMyApplications(): Promise<MyApplication[]> {
   const supabase = await createClient();
@@ -52,7 +59,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
   const { data, error } = await supabase
     .from("applications")
     .select(
-      "*, club:clubs(name, slug, recruitment_deadline, category:categories(*))",
+      "*, club:clubs(name, slug, recruitment_deadline, result_date, results_published_at, category:categories(*))",
     )
     .eq("profile_id", user.id)
     .order("created_at", { ascending: false });
@@ -60,7 +67,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
   return (data ?? []) as MyApplication[];
 }
 
-/** Clubs I'm a member of (the roster side). */
+/** Clubs the user is a member of. */
 export async function getMyMemberships(): Promise<MyMembership[]> {
   const supabase = await createClient();
   const {

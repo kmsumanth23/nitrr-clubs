@@ -6,16 +6,12 @@ import { useFormStatus } from "react-dom";
 import { updateClub, type ClubEditResult } from "@/lib/actions/club";
 import { HighlightsInput } from "@/components/admin/highlights-input";
 import { Modal } from "@/components/ui/modal";
+import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import type { Club, Category, AdminTier } from "@/lib/database.types";
 
 /**
  * Edit form for one club. All tiers (editor/manager/lead) can edit content.
- *
- * Safety:
- *  - Save-confirm modal on submit (browser intercepts; only "Yes, save" in
- *    the modal triggers the real action).
- *  - `beforeunload` warns on reload/tab-close while the form is dirty.
- *  - In-app link clicks also confirm if the form is dirty.
+ * Now includes both recruitment_deadline and result_date.
  */
 export function ClubEditForm({
   club,
@@ -34,48 +30,16 @@ export function ClubEditForm({
   const formRef = React.useRef<HTMLFormElement>(null);
   const [dirty, setDirty] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
-  // when true, the next submit bypasses the confirm modal (the modal sets this
-  // right before calling requestSubmit)
   const bypassRef = React.useRef(false);
 
   React.useEffect(() => {
     if (state.ok) setDirty(false);
   }, [state.ok]);
 
-  // Warn on reload / tab-close while dirty.
-  React.useEffect(() => {
-    function onBeforeUnload(e: BeforeUnloadEvent) {
-      if (!dirty) return;
-      e.preventDefault();
-      e.returnValue = "";
-    }
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [dirty]);
-
-  // Warn on in-app link clicks while dirty.
-  React.useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (!dirty) return;
-      const target = (e.target as HTMLElement | null)?.closest("a");
-      if (!target) return;
-      const href = target.getAttribute("href");
-      if (!href || href.startsWith("#") || target.target === "_blank") return;
-      const ok = window.confirm(
-        "You have unsaved changes. Leave without saving?",
-      );
-      if (!ok) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    }
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
-  }, [dirty]);
+  useUnsavedChanges(dirty);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     if (bypassRef.current) {
-      // confirmed already → let the submit through
       bypassRef.current = false;
       return;
     }
@@ -91,6 +55,11 @@ export function ClubEditForm({
 
   const deadlineDefault = club.recruitment_deadline
     ? toLocalInputValue(club.recruitment_deadline)
+    : "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const resultDefault = (club as any).result_date
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? toLocalInputValue((club as any).result_date)
     : "";
 
   return (
@@ -160,27 +129,45 @@ export function ClubEditForm({
             />
             Open for applications
           </label>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-ink">
-              Application deadline
-            </label>
-            <input
-              type="datetime-local"
-              name="recruitment_deadline"
-              defaultValue={deadlineDefault}
-              className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
-            />
-            <p className="mt-1.5 text-[11px] text-ink-soft">
-              Single cutoff for apply / re-apply / withdraw / edit. After this
-              time the application is frozen.
-            </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-ink">
+                Application deadline
+              </label>
+              <input
+                type="datetime-local"
+                name="recruitment_deadline"
+                defaultValue={deadlineDefault}
+                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
+              />
+              <p className="mt-1.5 text-[11px] text-ink-soft">
+                Students can apply, edit, and withdraw until this time.
+              </p>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-ink">
+                Result date (target)
+              </label>
+              <input
+                type="datetime-local"
+                name="result_date"
+                defaultValue={resultDefault}
+                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
+              />
+              <p className="mt-1.5 text-[11px] text-ink-soft">
+                Promised date for results. Extendable; results publish via the
+                lead&apos;s &quot;Publish&quot; button on the Applications page.
+              </p>
+            </div>
           </div>
-          <Field
-            label="Member count"
-            name="member_count"
-            type="number"
-            defaultValue={String(club.member_count ?? 0)}
-          />
+          <div className="mt-4">
+            <Field
+              label="Member count"
+              name="member_count"
+              type="number"
+              defaultValue={String(club.member_count ?? 0)}
+            />
+          </div>
         </div>
 
         <div className="rounded-2xl border border-line bg-white p-5">

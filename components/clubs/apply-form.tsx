@@ -2,10 +2,9 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import Link from "next/link";
 import {
   submitApplication,
-  type ApplyResult,
+  type ApplicationResult,
 } from "@/lib/actions/application";
 
 interface KnownProfile {
@@ -16,9 +15,10 @@ interface KnownProfile {
 }
 
 /**
- * Apply form. Known profile fields shown read-only; 3 generic questions are
- * the inputs. If the student has a WITHDRAWN row, submitting re-applies (the
- * action revives it). An ACTIVE row → "already applied".
+ * Apply form. Known profile fields shown read-only (pulled from profile);
+ * 3 generic questions are the inputs. If the student previously withdrew,
+ * the action will update the same row back to pending — we show a small
+ * "you previously withdrew" banner as a hint.
  */
 export function ApplyForm({
   clubId,
@@ -31,26 +31,10 @@ export function ApplyForm({
   profile: KnownProfile;
   existingStatus: string | null;
 }) {
-  const [state, formAction] = useActionState<ApplyResult, FormData>(
+  const [state, formAction] = useActionState<ApplicationResult, FormData>(
     submitApplication,
     {},
   );
-
-  if (state.alreadyApplied) {
-    return (
-      <div className="rounded-2xl border border-line bg-white p-6 text-center">
-        <p className="text-sm text-ink">
-          You&apos;ve already applied to {clubName}.
-        </p>
-        <Link
-          href="/profile"
-          className="mt-3 inline-block text-sm font-medium text-indigo"
-        >
-          View your applications →
-        </Link>
-      </div>
-    );
-  }
 
   const reapplying = existingStatus === "withdrawn";
 
@@ -60,7 +44,8 @@ export function ApplyForm({
 
       {reapplying && (
         <div className="rounded-2xl border border-indigo-soft bg-indigo-soft px-4 py-3 text-xs text-indigo">
-          You previously withdrew. Submitting will re-apply with your new answers.
+          You previously withdrew from {clubName}. Submitting will re-apply
+          with your new answers.
         </div>
       )}
 
@@ -71,23 +56,39 @@ export function ApplyForm({
         <div className="grid grid-cols-2 gap-3 text-sm">
           <Field label="Name" value={profile.full_name} />
           <Field label="Roll number" value={profile.roll_number} />
-          <Field label="Year" value={profile.year?.toString()} />
+          <Field label="Year" value={profile.year?.toString() ?? null} />
           <Field label="Branch" value={profile.branch} />
         </div>
       </div>
 
-      <Question name="motivation" label="Why do you want to join?" placeholder="What draws you to this club?" required />
-      <Question name="experience" label="Relevant experience or skills" placeholder="Anything you've done before (optional)" />
-      <Question name="contribution" label="What can you contribute?" placeholder="How would you add to the club?" required />
+      <Question
+        name="motivation"
+        label="Why do you want to join?"
+        placeholder="What draws you to this club?"
+        required
+      />
+      <Question
+        name="experience"
+        label="Relevant experience or skills"
+        placeholder="Anything you've done before (optional)"
+      />
+      <Question
+        name="contribution"
+        label="What can you contribute?"
+        placeholder="How would you add to the club?"
+        required
+      />
 
-      {state.error && <p className="text-center text-xs text-clay">{state.error}</p>}
+      {state.error && (
+        <p className="text-center text-xs text-clay">{state.error}</p>
+      )}
 
       <Submit reapplying={reapplying} />
     </form>
   );
 }
 
-function Field({ label, value }: { label: string; value?: string | null }) {
+function Field({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <div className="text-[11px] text-ink-soft">{label}</div>
@@ -131,7 +132,11 @@ function Submit({ reapplying }: { reapplying: boolean }) {
       disabled={pending}
       className="w-full rounded-full bg-indigo px-6 py-3 text-sm font-medium text-indigo-fg hover:bg-indigo/90 disabled:opacity-60"
     >
-      {pending ? "Submitting…" : reapplying ? "Re-apply" : "Submit application"}
+      {pending
+        ? "Submitting…"
+        : reapplying
+          ? "Re-apply"
+          : "Submit application"}
     </button>
   );
 }

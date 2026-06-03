@@ -4,37 +4,20 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { applicationSchema } from "@/lib/validation/application";
-import { isOpen, CLOSED_MESSAGE } from "@/lib/deadline";
+import { getPhase } from "@/lib/phase";
 
-export type ApplyResult = {
-  error?: string;
-  alreadyApplied?: boolean;
-  withdrawnClosed?: boolean;
-};
-
-async function clubDeadline(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  clubId: string,
-): Promise<string | null> {
-  const { data } = await supabase
-    .from("clubs")
-    .select("recruitment_deadline")
-    .eq("id", clubId)
-    .maybeSingle();
-  return data?.recruitment_deadline ?? null;
-}
+export type ApplicationResult = { error?: string; ok?: boolean };
 
 /**
- * Submit (or re-submit) an application.
- *  - Deadline wall: now < club.recruitment_deadline (checked here + DB trigger).
- *  - Re-apply after withdraw WITHIN the window: we revive the same row
- *    (status → pending) so the unique (club_id, profile_id) doesn't block it.
- *  - Active duplicate: "already applied".
+ * Apply to a club. Allowed only in 'open' phase. Also handles re-apply:
+ * if the student has a previous withdrawn/rejected/removed app for this
+ * club within the current cycle, we update it back to pending. After
+ * publish, the cycle is over and `removed` blocks re-apply (handled below).
  */
 export async function submitApplication(
-  _prev: ApplyResult,
+  _prev: ApplicationResult,
   formData: FormData,
-): Promise<ApplyResult> {
+): Promise<ApplicationResult> {
   const parsed = applicationSchema.safeParse({
     clubId: formData.get("clubId"),
     motivation: formData.get("motivation"),
@@ -42,21 +25,31 @@ export async function submitApplication(
     contribution: formData.get("contribution"),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { clubId, ...responses } = parsed.data;
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: "Please sign in to apply." };
+  if (!user) return { error: "Please sign in." };
 
-  const { clubId, motivation, experience, contribution } = parsed.data;
-  const responses = { motivation, experience: experience ?? "", contribution };
+  const { data: club } = await supabase
+    .from("clubs")
+    .select(
+      "slug, recruitment_deadline, result_date, results_published_at, is_recruiting",
+    )
+    .eq("id", clubId)
+    .maybeSingle();
+  if (!club) return { error: "Club not found." };
+  if (!club.is_recruiting)
+    return { error: "This club is not currently recruiting." };
 
-  // deadline wall
-  const dl = await clubDeadline(supabase, clubId);
-  if (!isOpen(dl)) return { error: CLOSED_MESSAGE };
+  const phase = getPhase(club);
+  if (phase !== "open") {
+    return { error: "Applications are closed for this club." };
+  }
 
-  // is there an existing row for this (club, user)?
+  // If a previous app exists for this club from this user, re-use the row.
   const { data: existing } = await supabase
     .from("applications")
     .select("id, status")
@@ -65,98 +58,115 @@ export async function submitApplication(
     .maybeSingle();
 
   if (existing) {
-    if (existing.status === "withdrawn") {
-      // re-apply within the window → revive the same row
-      const { error } = await supabase
-        .from("applications")
-        .update({ status: "pending", responses })
-        .eq("id", existing.id);
-      if (error) return { error: error.message };
-    } else {
-      return { alreadyApplied: true };
-    }
+    // Trust the trigger to enforce phase rules — if we're in a fresh open
+    // phase (new cycle), reviving any prior status (withdrawn / rejected /
+    // accepted / removed) is fine. The trigger will block this update
+    // outside open phase, and we surface that error to the user.
+    const { error } = await supabase
+      .from("applications")
+      .update({ status: "pending", responses })
+      .eq("id", existing.id);
+    if (error) return { error: error.message };
   } else {
     const { error } = await supabase.from("applications").insert({
       club_id: clubId,
       profile_id: user.id,
+      status: "pending",
       responses,
     });
-    if (error) {
-      if (error.code === "23505") return { alreadyApplied: true };
-      if (error.code === "P0001") return { error: error.message };
-      return { error: error.message };
-    }
+    if (error) return { error: error.message };
   }
 
   revalidatePath("/profile");
-  redirect("/profile?applied=1");
+  revalidatePath(`/clubs/${club.slug}`);
+  redirect("/profile");
 }
 
-/** Edit an application's responses — allowed only before the deadline. */
+/** Student edits their own application. Allowed only in 'open' phase. */
 export async function editApplication(
-  _prev: { error?: string; ok?: boolean },
+  _prev: ApplicationResult,
   formData: FormData,
-): Promise<{ error?: string; ok?: boolean }> {
-  const id = formData.get("applicationId") as string | null;
-  const motivation = (formData.get("motivation") as string) ?? "";
-  const experience = (formData.get("experience") as string) ?? "";
-  const contribution = (formData.get("contribution") as string) ?? "";
-  if (!id) return { error: "Missing application id." };
+): Promise<ApplicationResult> {
+  const applicationId = formData.get("applicationId") as string;
+  if (!applicationId) return { error: "Missing application id." };
+
+  const parsed = applicationSchema
+    .omit({ clubId: true })
+    .safeParse({
+      motivation: formData.get("motivation"),
+      experience: formData.get("experience"),
+      contribution: formData.get("contribution"),
+    });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Please sign in." };
 
-  // find the club to check its deadline
   const { data: app } = await supabase
     .from("applications")
-    .select("club_id, status")
-    .eq("id", id)
+    .select(
+      "id, profile_id, status, club:clubs(slug, recruitment_deadline, result_date, results_published_at)",
+    )
+    .eq("id", applicationId)
     .maybeSingle();
-  if (!app) return { error: "Application not found." };
+  if (!app || app.profile_id !== user.id)
+    return { error: "Application not found." };
 
-  const dl = await clubDeadline(supabase, app.club_id);
-  if (!isOpen(dl)) return { error: CLOSED_MESSAGE };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const club: any = app.club;
+  const phase = getPhase(club);
+  if (phase !== "open") {
+    return { error: "You can no longer edit this application." };
+  }
 
   const { error } = await supabase
     .from("applications")
-    .update({ responses: { motivation, experience, contribution } })
-    .eq("id", id);
+    .update({ responses: parsed.data })
+    .eq("id", applicationId);
   if (error) return { error: error.message };
 
   revalidatePath("/profile");
   return { ok: true };
 }
 
-/**
- * Withdraw — allowed only before the deadline. Server checks the deadline (not
- * just the UI), closing the crafted-request hole. Sets status='withdrawn'.
- */
+/** Student withdraws their own application. Allowed only in 'open' phase. */
 export async function withdrawApplication(
-  _prev: { error?: string; ok?: boolean },
+  _prev: ApplicationResult,
   formData: FormData,
-): Promise<{ error?: string; ok?: boolean }> {
-  const id = formData.get("applicationId") as string | null;
-  if (!id) return { error: "Missing application id." };
+): Promise<ApplicationResult> {
+  const applicationId = formData.get("applicationId") as string;
+  if (!applicationId) return { error: "Missing application id." };
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Please sign in." };
 
   const { data: app } = await supabase
     .from("applications")
-    .select("club_id, status")
-    .eq("id", id)
+    .select(
+      "id, profile_id, status, club:clubs(recruitment_deadline, result_date, results_published_at)",
+    )
+    .eq("id", applicationId)
     .maybeSingle();
-  if (!app) return { error: "Application not found." };
+  if (!app || app.profile_id !== user.id)
+    return { error: "Application not found." };
 
-  // only churn-able states, and only before the deadline
-  if (!["pending", "reviewing"].includes(app.status)) {
-    return { error: "This application can no longer be withdrawn." };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const club: any = app.club;
+  const phase = getPhase(club);
+  if (phase !== "open") {
+    return { error: "You can no longer withdraw this application." };
   }
-  const dl = await clubDeadline(supabase, app.club_id);
-  if (!isOpen(dl)) return { error: CLOSED_MESSAGE };
 
   const { error } = await supabase
     .from("applications")
     .update({ status: "withdrawn" })
-    .eq("id", id);
+    .eq("id", applicationId);
   if (error) return { error: error.message };
 
   revalidatePath("/profile");
