@@ -19,7 +19,7 @@ export default async function AdminClubEditPage({
   ]);
   if (!data) notFound();
 
-  const { club, category, tier } = data;
+  const { club, category, tier, current_recruitment } = data;
 
   return (
     <section>
@@ -55,7 +55,12 @@ export default async function AdminClubEditPage({
         </Link>
       </div>
 
-      <ClubEditForm club={{ ...club, category }} categories={categories} tier={tier} />
+      <ClubEditForm
+        club={{ ...club, category }}
+        categories={categories}
+        tier={tier}
+        currentRecruitment={current_recruitment}
+      />
     </section>
   );
 }

@@ -5,22 +5,29 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { updateClub, type ClubEditResult } from "@/lib/actions/club";
 import { HighlightsInput } from "@/components/admin/highlights-input";
+import { StartNewRecruitmentButton } from "@/components/admin/start-new-recruitment-button";
 import { Modal } from "@/components/ui/modal";
 import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import type { Club, Category, AdminTier } from "@/lib/database.types";
 
-/**
- * Edit form for one club. All tiers (editor/manager/lead) can edit content.
- * Now includes both recruitment_deadline and result_date.
- */
+interface RecruitmentForForm {
+  id: string;
+  name: string | null;
+  deadline: string | null;
+  result_date: string | null;
+  results_published_at: string | null;
+}
+
 export function ClubEditForm({
   club,
   categories,
   tier,
+  currentRecruitment,
 }: {
   club: Club & { category: Category | null };
   categories: Category[];
   tier: AdminTier;
+  currentRecruitment: RecruitmentForForm | null;
 }) {
   const [state, formAction] = useActionState<ClubEditResult, FormData>(
     updateClub,
@@ -46,24 +53,48 @@ export function ClubEditForm({
     e.preventDefault();
     setConfirmOpen(true);
   }
-
   function confirmSave() {
     setConfirmOpen(false);
     bypassRef.current = true;
     formRef.current?.requestSubmit();
   }
 
-  const deadlineDefault = club.recruitment_deadline
-    ? toLocalInputValue(club.recruitment_deadline)
+  const deadlineDefault = currentRecruitment?.deadline
+    ? toLocalInputValue(currentRecruitment.deadline)
     : "";
+  const resultDefault = currentRecruitment?.result_date
+    ? toLocalInputValue(currentRecruitment.result_date)
+    : "";
+  const published = !!currentRecruitment?.results_published_at;
+  const noRecruitment = !currentRecruitment;
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const resultDefault = (club as any).result_date
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? toLocalInputValue((club as any).result_date)
-    : "";
+  const communityLink = (club as any).community_whatsapp_link ?? "";
 
   return (
     <>
+      {/* Recruitment status + "Start new recruitment" — OUTSIDE the form.
+          The button opens a modal with its own <form>, and HTML disallows
+          nested forms. Keeping this above the editable form sidesteps that. */}
+      {(published || noRecruitment) && (
+        <div className="mb-6 flex items-start justify-between gap-3 rounded-2xl border border-line bg-white p-4">
+          <p className="flex-1 text-xs text-ink-soft">
+            {published ? (
+              <>
+                Results were published on{" "}
+                <span className="font-medium text-ink">
+                  {new Date(currentRecruitment!.results_published_at!).toLocaleString("en-IN")}
+                </span>
+                . Start a new recruitment to begin a fresh cycle.
+              </>
+            ) : (
+              "No recruitment opened yet. Start one to begin accepting applications."
+            )}
+          </p>
+          <StartNewRecruitmentButton clubId={club.id} clubSlug={club.slug} />
+        </div>
+      )}
+
       <form
         ref={formRef}
         action={formAction}
@@ -83,9 +114,7 @@ export function ClubEditForm({
             placeholder="A short one-liner"
           />
           <div>
-            <label className="mb-1.5 mt-4 block text-sm font-medium text-ink">
-              Category
-            </label>
+            <label className="mb-1.5 mt-4 block text-sm font-medium text-ink">Category</label>
             <select
               name="category_id"
               defaultValue={club.category_id ?? ""}
@@ -93,16 +122,12 @@ export function ClubEditForm({
             >
               <option value="">— Uncategorized —</option>
               {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
           </div>
           <div className="mt-4">
-            <label className="mb-1.5 block text-sm font-medium text-ink">
-              Description
-            </label>
+            <label className="mb-1.5 block text-sm font-medium text-ink">Description</label>
             <textarea
               name="description"
               rows={4}
@@ -119,7 +144,7 @@ export function ClubEditForm({
         </div>
 
         <div className="rounded-2xl border border-line bg-white p-5">
-          <h3 className="mb-4 text-sm font-bold text-ink">Recruitment</h3>
+          <h3 className="mb-4 text-sm font-bold text-ink">Current recruitment</h3>
           <label className="mb-3 flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
@@ -127,37 +152,34 @@ export function ClubEditForm({
               defaultChecked={club.is_recruiting}
               className="h-4 w-4 rounded border-line accent-indigo"
             />
-            Open for applications
+            Show as recruiting on public pages
           </label>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-ink">
-                Application deadline
-              </label>
+              <label className="mb-1.5 block text-sm font-medium text-ink">Application deadline</label>
               <input
                 type="datetime-local"
                 name="recruitment_deadline"
                 defaultValue={deadlineDefault}
-                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
+                disabled={published}
+                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:opacity-50"
               />
               <p className="mt-1.5 text-[11px] text-ink-soft">
-                Students can apply, edit, and withdraw until this time.
+                {published
+                  ? "Locked — results are published for the current recruitment."
+                  : "Students can apply, edit, and withdraw until this time."}
               </p>
             </div>
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-ink">
-                Result date (target)
-              </label>
+              <label className="mb-1.5 block text-sm font-medium text-ink">Result date (target)</label>
               <input
                 type="datetime-local"
                 name="result_date"
                 defaultValue={resultDefault}
-                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
+                disabled={published}
+                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:opacity-50"
               />
-              <p className="mt-1.5 text-[11px] text-ink-soft">
-                Promised date for results. Extendable; results publish via the
-                lead&apos;s &quot;Publish&quot; button on the Applications page.
-              </p>
+              <p className="mt-1.5 text-[11px] text-ink-soft">Promised date for results.</p>
             </div>
           </div>
           <div className="mt-4">
@@ -168,6 +190,20 @@ export function ClubEditForm({
               defaultValue={String(club.member_count ?? 0)}
             />
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-line bg-white p-5">
+          <h3 className="mb-4 text-sm font-bold text-ink">Community</h3>
+          <Field
+            label="Community WhatsApp link"
+            name="community_whatsapp_link"
+            defaultValue={communityLink}
+            placeholder="https://chat.whatsapp.com/..."
+          />
+          <p className="mt-1.5 text-[11px] text-ink-soft">
+            The permanent club group. Revealed to accepted members on their
+            profile after publish. (Reveal UX lands in step 11.)
+          </p>
         </div>
 
         <div className="rounded-2xl border border-line bg-white p-5">
@@ -201,12 +237,9 @@ export function ClubEditForm({
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <div className="space-y-4">
-          <h3 className="font-display text-lg font-bold text-ink">
-            Save these changes?
-          </h3>
+          <h3 className="font-display text-lg font-bold text-ink">Save these changes?</h3>
           <p className="text-sm text-ink-soft">
-            Your edits will replace the current content. The public club page
-            updates within about a minute.
+            Your edits will replace the current content. The public club page updates within about a minute.
           </p>
           <div className="flex gap-2">
             <button
@@ -244,19 +277,10 @@ function SaveButton() {
 }
 
 function Field({
-  label,
-  name,
-  type = "text",
-  defaultValue,
-  placeholder,
-  required,
+  label, name, type = "text", defaultValue, placeholder, required,
 }: {
-  label: string;
-  name: string;
-  type?: string;
-  defaultValue: string;
-  placeholder?: string;
-  required?: boolean;
+  label: string; name: string; type?: string;
+  defaultValue: string; placeholder?: string; required?: boolean;
 }) {
   return (
     <div className="mt-4 first:mt-0">

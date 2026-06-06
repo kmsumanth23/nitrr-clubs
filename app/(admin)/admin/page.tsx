@@ -79,7 +79,7 @@ export default async function AdminPage() {
                     )}
                   </div>
                   <div className="mt-2 text-[11px] text-ink-soft">
-                    {deadlineLabel(c.recruitment_deadline)} ·{" "}
+                    {deadlineLabel(c.current_recruitment?.deadline ?? null)} ·{" "}
                     {c.is_recruiting ? "Recruiting" : "Not recruiting"}
                   </div>
                 </Link>

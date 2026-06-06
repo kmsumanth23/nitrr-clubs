@@ -23,6 +23,7 @@ export type Database = {
           note_at: string | null
           note_by: string | null
           profile_id: string
+          recruitment_id: string
           responses: Json
           status: Database["public"]["Enums"]["application_status"]
           updated_at: string
@@ -35,6 +36,7 @@ export type Database = {
           note_at?: string | null
           note_by?: string | null
           profile_id: string
+          recruitment_id: string
           responses?: Json
           status?: Database["public"]["Enums"]["application_status"]
           updated_at?: string
@@ -47,6 +49,7 @@ export type Database = {
           note_at?: string | null
           note_by?: string | null
           profile_id?: string
+          recruitment_id?: string
           responses?: Json
           status?: Database["public"]["Enums"]["application_status"]
           updated_at?: string
@@ -71,6 +74,13 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "applications_recruitment_id_fkey"
+            columns: ["recruitment_id"]
+            isOneToOne: false
+            referencedRelation: "recruitments"
             referencedColumns: ["id"]
           },
         ]
@@ -224,6 +234,7 @@ export type Database = {
       clubs: {
         Row: {
           category_id: string | null
+          community_whatsapp_link: string | null
           cover_url: string | null
           created_at: string
           description: string | null
@@ -235,10 +246,6 @@ export type Database = {
           logo_url: string | null
           member_count: number | null
           name: string
-          recruitment_deadline: string | null
-          result_date: string | null
-          results_published_at: string | null
-          results_published_by: string | null
           slug: string
           tagline: string | null
           updated_at: string
@@ -246,6 +253,7 @@ export type Database = {
         }
         Insert: {
           category_id?: string | null
+          community_whatsapp_link?: string | null
           cover_url?: string | null
           created_at?: string
           description?: string | null
@@ -257,10 +265,6 @@ export type Database = {
           logo_url?: string | null
           member_count?: number | null
           name: string
-          recruitment_deadline?: string | null
-          result_date?: string | null
-          results_published_at?: string | null
-          results_published_by?: string | null
           slug: string
           tagline?: string | null
           updated_at?: string
@@ -268,6 +272,7 @@ export type Database = {
         }
         Update: {
           category_id?: string | null
+          community_whatsapp_link?: string | null
           cover_url?: string | null
           created_at?: string
           description?: string | null
@@ -279,10 +284,6 @@ export type Database = {
           logo_url?: string | null
           member_count?: number | null
           name?: string
-          recruitment_deadline?: string | null
-          result_date?: string | null
-          results_published_at?: string | null
-          results_published_by?: string | null
           slug?: string
           tagline?: string | null
           updated_at?: string
@@ -294,13 +295,6 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "clubs_results_published_by_fkey"
-            columns: ["results_published_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -492,6 +486,70 @@ export type Database = {
         }
         Relationships: []
       }
+      recruitments: {
+        Row: {
+          club_id: string
+          created_at: string
+          created_by: string | null
+          deadline: string | null
+          id: string
+          interview_mode: string | null
+          interview_whatsapp_link: string | null
+          name: string | null
+          result_date: string | null
+          results_published_at: string | null
+          results_published_by: string | null
+        }
+        Insert: {
+          club_id: string
+          created_at?: string
+          created_by?: string | null
+          deadline?: string | null
+          id?: string
+          interview_mode?: string | null
+          interview_whatsapp_link?: string | null
+          name?: string | null
+          result_date?: string | null
+          results_published_at?: string | null
+          results_published_by?: string | null
+        }
+        Update: {
+          club_id?: string
+          created_at?: string
+          created_by?: string | null
+          deadline?: string | null
+          id?: string
+          interview_mode?: string | null
+          interview_whatsapp_link?: string | null
+          name?: string | null
+          result_date?: string | null
+          results_published_at?: string | null
+          results_published_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recruitments_club_id_fkey"
+            columns: ["club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "recruitments_results_published_by_fkey"
+            columns: ["results_published_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -503,11 +561,36 @@ export type Database = {
         Args: { target_club: string }
         Returns: boolean
       }
-      club_phase: { Args: { club_id_in: string }; Returns: string }
       club_tier: { Args: { target_club: string }; Returns: string }
+      current_recruitment_for_club: {
+        Args: { club_id_in: string }
+        Returns: string
+      }
       is_club_admin: { Args: { target_club: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
-      publish_club_results: { Args: { club_id_in: string }; Returns: undefined }
+      publish_recruitment_results: {
+        Args: { recruitment_id_in: string }
+        Returns: undefined
+      }
+      recruitment_phase: {
+        Args: { recruitment_id_in: string }
+        Returns: string
+      }
+      remove_member: {
+        Args: { club_id_in: string; profile_id_in: string }
+        Returns: undefined
+      }
+      start_new_recruitment: {
+        Args: {
+          club_id_in: string
+          deadline_in: string
+          interview_mode_in?: string
+          interview_whatsapp_link_in?: string
+          name_in: string
+          result_date_in: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       application_status:

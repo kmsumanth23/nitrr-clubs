@@ -87,6 +87,6 @@ note history is global with respct to club and recruit
 
 even when there are no applications the publish result is shown fix that
 
-manager should be able to get the list of all the members in the club.
+manager should be able to get the list of all the members in the club. download as pdf same for number of applicants to check if they have joined the group
 
 super admins should also have ability to create clubs

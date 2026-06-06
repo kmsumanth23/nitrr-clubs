@@ -9,7 +9,7 @@ import {
   withdrawApplication,
   editApplication,
 } from "@/lib/actions/application";
-import { isOpen, deadlineLabel } from "@/lib/deadline";
+import { deadlineLabel } from "@/lib/deadline";
 import { getPhase, type Phase } from "@/lib/phase";
 import type { MyApplication } from "@/lib/queries/profile";
 import type { ApplicationStatus } from "@/lib/database.types";
@@ -22,8 +22,6 @@ const STATUS_STYLES: Record<ApplicationStatus, string> = {
   withdrawn: "bg-line text-ink-soft",
   removed: "bg-clay-soft text-clay",
 };
-
-// During review phase, students always see this — not the real decision.
 const REVIEW_STYLE = "bg-indigo-soft text-indigo";
 
 type Responses = {
@@ -32,28 +30,16 @@ type Responses = {
   contribution?: string;
 };
 
-/**
- * Decide what the student should see for status. Hides admin decisions
- * during review phase — they only learn their result when the lead publishes.
- */
 function displayStatus(
   app: MyApplication,
-  phase: Phase,
+  phase: Phase | null,
 ): { label: string; style: string } {
-  // student-set states are always shown as-is
-  if (app.status === "withdrawn") {
+  if (app.status === "withdrawn")
     return { label: "Withdrawn", style: STATUS_STYLES.withdrawn };
-  }
-  if (app.status === "removed") {
+  if (app.status === "removed")
     return { label: "Removed", style: STATUS_STYLES.removed };
-  }
-
-  // hide real decisions during review — student sees a generic label
-  if (phase === "review") {
+  if (phase === "review")
     return { label: "Under review", style: REVIEW_STYLE };
-  }
-
-  // open or result phase: show the real status
   const label = app.status.charAt(0).toUpperCase() + app.status.slice(1);
   return { label, style: STATUS_STYLES[app.status] };
 }
@@ -62,16 +48,8 @@ export function ApplicationRow({ app }: { app: MyApplication }) {
   const [viewOpen, setViewOpen] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
 
-  const phase: Phase = getPhase({
-    recruitment_deadline: app.club?.recruitment_deadline ?? null,
-    result_date: app.club?.result_date ?? null,
-    results_published_at: app.club?.results_published_at ?? null,
-  });
-
-  const open = isOpen(app.club?.recruitment_deadline ?? null);
-  // Withdraw/edit only allowed in open phase + active status.
-  const canWithdraw =
-    open && phase === "open" && app.status === "pending";
+  const phase = getPhase(app.recruitment);
+  const canWithdraw = phase === "open" && app.status === "pending";
 
   const { label: statusLabel, style: statusStyle } = displayStatus(app, phase);
 
@@ -85,7 +63,12 @@ export function ApplicationRow({ app }: { app: MyApplication }) {
           {app.club?.name ?? "Club"}
         </Link>
         <div className="mt-0.5 text-xs text-ink-soft">
-          {deadlineLabel(app.club?.recruitment_deadline ?? null)}
+          {app.recruitment?.name && (
+            <>
+              {app.recruitment.name} ·{" "}
+            </>
+          )}
+          {deadlineLabel(app.recruitment?.deadline ?? null)}
         </div>
       </div>
 
@@ -112,11 +95,7 @@ export function ApplicationRow({ app }: { app: MyApplication }) {
       </div>
 
       <Modal open={viewOpen} onClose={() => setViewOpen(false)}>
-        <ViewEdit
-          app={app}
-          phase={phase}
-          onDone={() => setViewOpen(false)}
-        />
+        <ViewEdit app={app} phase={phase} onDone={() => setViewOpen(false)} />
       </Modal>
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)}>
@@ -136,11 +115,10 @@ function ViewEdit({
   onDone,
 }: {
   app: MyApplication;
-  phase: Phase;
+  phase: Phase | null;
   onDone: () => void;
 }) {
   const r = (app.responses ?? {}) as Responses;
-  // Only editable during open phase with a pending status.
   const editable = phase === "open" && app.status === "pending";
   const [editing, setEditing] = React.useState(false);
   const [state, formAction] = useActionState(editApplication, {});
@@ -156,29 +134,11 @@ function ViewEdit({
     return (
       <form action={formAction} className="space-y-4">
         <input type="hidden" name="applicationId" value={app.id} />
-        <h3 className="font-display text-lg font-bold text-ink">
-          Edit application
-        </h3>
-        <Q
-          name="motivation"
-          label="Why do you want to join?"
-          defaultValue={r.motivation ?? ""}
-          required
-        />
-        <Q
-          name="experience"
-          label="Relevant experience or skills"
-          defaultValue={r.experience ?? ""}
-        />
-        <Q
-          name="contribution"
-          label="What can you contribute?"
-          defaultValue={r.contribution ?? ""}
-          required
-        />
-        {state.error && (
-          <p className="text-center text-xs text-clay">{state.error}</p>
-        )}
+        <h3 className="font-display text-lg font-bold text-ink">Edit application</h3>
+        <Q name="motivation" label="Why do you want to join?" defaultValue={r.motivation ?? ""} required />
+        <Q name="experience" label="Relevant experience or skills" defaultValue={r.experience ?? ""} />
+        <Q name="contribution" label="What can you contribute?" defaultValue={r.contribution ?? ""} required />
+        {state.error && <p className="text-center text-xs text-clay">{state.error}</p>}
         <div className="flex gap-2">
           <SaveBtn />
           <button
@@ -195,9 +155,7 @@ function ViewEdit({
 
   return (
     <div className="space-y-4">
-      <h3 className="font-display text-lg font-bold text-ink">
-        {app.club?.name ?? "Application"}
-      </h3>
+      <h3 className="font-display text-lg font-bold text-ink">{app.club?.name ?? "Application"}</h3>
       <Read label="Why do you want to join?" value={r.motivation} />
       <Read label="Relevant experience or skills" value={r.experience} />
       <Read label="What can you contribute?" value={r.contribution} />
@@ -225,12 +183,8 @@ function ViewEdit({
 function Read({ label, value }: { label: string; value?: string }) {
   return (
     <div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-soft">
-        {label}
-      </div>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
-        {value || "—"}
-      </p>
+      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-soft">{label}</div>
+      <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{value || "—"}</p>
     </div>
   );
 }
@@ -285,7 +239,6 @@ function WithdrawConfirm({
   onDone: () => void;
 }) {
   const [state, formAction] = useActionState(withdrawApplication, {});
-
   React.useEffect(() => {
     if (state.ok) onDone();
   }, [state.ok, onDone]);
@@ -293,17 +246,13 @@ function WithdrawConfirm({
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="applicationId" value={app.id} />
-      <h3 className="font-display text-lg font-bold text-ink">
-        Withdraw application?
-      </h3>
+      <h3 className="font-display text-lg font-bold text-ink">Withdraw application?</h3>
       <p className="text-sm text-ink-soft">
-        You can re-apply to {app.club?.name ?? "this club"} any time before the
-        deadline. After the deadline, the application stays withdrawn and
-        cannot be reopened — you may contact the club lead for queries.
+        You can re-apply to {app.club?.name ?? "this club"} any time before the deadline.
+        After the deadline, the application stays withdrawn and cannot be reopened —
+        you may contact the club lead for queries.
       </p>
-      {state.error && (
-        <p className="text-center text-xs text-clay">{state.error}</p>
-      )}
+      {state.error && <p className="text-center text-xs text-clay">{state.error}</p>}
       <div className="flex gap-2">
         <WithdrawBtn />
         <button

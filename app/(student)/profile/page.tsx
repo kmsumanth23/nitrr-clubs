@@ -1,86 +1,100 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ProfileEditForm } from "@/components/profile/profile-edit-form";
-import { ApplicationsList } from "@/components/profile/applications-list";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
 import {
   getMyProfile,
   getMyApplications,
   getMyMemberships,
+  partitionApplications,
 } from "@/lib/queries/profile";
+import { ProfileEditForm } from "@/components/profile/profile-edit-form";
+import { ApplicationsList } from "@/components/profile/applications-list";
 
 export const metadata = { title: "Profile — NITRR Clubs" };
+export const dynamic = "force-dynamic";
 
-export default async function ProfilePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ applied?: string }>;
-}) {
-  const { applied } = await searchParams;
+export default async function ProfilePage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/?signin=1");
 
   const [profile, applications, memberships] = await Promise.all([
     getMyProfile(),
     getMyApplications(),
     getMyMemberships(),
   ]);
+  if (!profile) redirect("/?signin=1");
 
-  // No profile shouldn't happen (the trigger creates one on signup), but if
-  // somehow missing, send them through complete-profile.
-  if (!profile) redirect("/profile/complete");
-
-  // Profile completeness gate: if any required field is null, prompt completion.
-  if (!profile.roll_number) redirect("/profile/complete?next=/profile");
+  const { active, history } = partitionApplications(applications);
 
   return (
-    <section className="mx-auto max-w-3xl px-6 pb-20 pt-28">
+    <section className="container mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <div className="mb-8">
-        <h1 className="text-3xl font-extrabold tracking-tight text-ink">
-          Your dashboard
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
+          Your profile
         </h1>
-        <p className="mt-2 text-sm text-ink-soft">
-          Edit your details, see your applications, and the clubs you&apos;ve joined.
-        </p>
+        <p className="mt-1 text-sm text-ink-soft">{profile.email}</p>
       </div>
 
-      {applied === "1" && (
-        <div className="mb-6 rounded-2xl border border-sport-soft bg-sport-soft px-4 py-3 text-sm text-sport">
-          Application submitted. The club will review it shortly.
-        </div>
-      )}
+      <div className="space-y-10">
+        <section>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">
+            Profile details
+          </h2>
+          <ProfileEditForm profile={profile} />
+        </section>
 
-      {/* PROFILE */}
-      <ProfileEditForm profile={profile} />
-
-      {/* MY CLUBS */}
-      <h2 className="mb-3 mt-10 text-lg font-bold text-ink">My clubs</h2>
-      {memberships.length === 0 ? (
-        <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
-          You aren&apos;t a member of any club yet. Apply to a club and once you&apos;re
-          accepted you&apos;ll show up here.
-        </p>
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {memberships.map((m) => (
-            <li
-              key={m.club_id}
-              className="rounded-2xl border border-line bg-white p-4"
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-ink-soft">
+              My applications
+            </h2>
+            <Link
+              href="/clubs"
+              className="text-xs text-ink-soft hover:text-ink hover:underline"
             >
-              <Link
-                href={`/clubs/${m.club?.slug ?? ""}`}
-                className="block text-sm font-medium text-ink hover:text-indigo"
-              >
-                {m.club?.name ?? "Club"}
-              </Link>
-              <div className="mt-0.5 text-xs text-ink-soft">
-                Joined {new Date(m.joined_at).toLocaleDateString("en-IN")}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+              Browse clubs →
+            </Link>
+          </div>
+          <ApplicationsList active={active} history={history} />
+        </section>
 
-      {/* APPLICATIONS */}
-      <h2 className="mb-3 mt-10 text-lg font-bold text-ink">My applications</h2>
-      <ApplicationsList items={applications} />
+        <section>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">
+            My clubs
+          </h2>
+          {memberships.length === 0 ? (
+            <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
+              You&apos;re not in any clubs yet. Apply to one and once results
+              are published, you&apos;ll see it here.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {memberships.map((m) => (
+                <li
+                  key={m.club_id}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4"
+                >
+                  <div className="min-w-0">
+                    <Link
+                      href={m.club ? `/clubs/${m.club.slug}` : "#"}
+                      className="block truncate text-sm font-medium text-ink hover:text-indigo"
+                    >
+                      {m.club?.name ?? "Club"}
+                    </Link>
+                    <div className="mt-0.5 text-xs text-ink-soft">
+                      {m.club?.category?.name ?? "Club"} · Joined{" "}
+                      {new Date(m.joined_at).toLocaleDateString("en-IN")}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </section>
   );
 }

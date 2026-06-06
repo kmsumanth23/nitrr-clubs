@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/supabase__server";
+import { createClient } from "@/lib/supabase/server";
 import type { Club, Category, EventRow, Faq } from "@/lib/database.types";
 
 export type ClubWithCategory = Club & { category: Category | null };
@@ -44,11 +44,11 @@ export async function getGalleryImages(limit = 16): Promise<string[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("gallery_photos")
-    .select("*")
+    .select("image_url")
     .order("sort_order", { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return ((data ?? []) as { image_url: string }[]).map((r) => r.image_url);
+  return (data ?? []).map((r) => r.image_url);
 }
 
 export interface SiteStats {
@@ -60,7 +60,7 @@ export interface SiteStats {
 
 /**
  * Live counts for the stats capsule. `head: true` + `count: "exact"` returns
- * only the count, not rows — cheap. members = sum of member_count.
+ * only the count, not rows. members = sum of member_count across all clubs.
  */
 export async function getSiteStats(): Promise<SiteStats> {
   const supabase = await createClient();
@@ -72,7 +72,7 @@ export async function getSiteStats(): Promise<SiteStats> {
     supabase.from("clubs").select("member_count"),
   ]);
 
-  const members = ((membersRes.data ?? []) as { member_count: number | null }[]).reduce(
+  const members = (membersRes.data ?? []).reduce(
     (sum, c) => sum + (c.member_count ?? 0),
     0,
   );

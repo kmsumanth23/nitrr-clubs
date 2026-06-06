@@ -24,7 +24,7 @@ export default async function ApplyPage({
 
   const { data: club } = await supabase
     .from("clubs")
-    .select("id, name, slug, is_recruiting, recruitment_deadline")
+    .select("id, name, slug, is_recruiting")
     .eq("slug", slug)
     .maybeSingle();
   if (!club) notFound();
@@ -41,10 +41,21 @@ export default async function ApplyPage({
     redirect(`/profile/complete?next=/clubs/${slug}/apply`);
   }
 
-  const open = isOpen(club.recruitment_deadline);
+  // Current (latest) recruitment for the club — deadline lives here now.
+  const { data: recruitment } = await supabase
+    .from("recruitments")
+    .select("id, deadline")
+    .eq("club_id", club.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const open = !!recruitment && isOpen(recruitment.deadline);
 
   // already a member or admin? the DB trigger blocks it, but check here for a
-  // clean message instead of a failed submit.
+  // clean message instead of a failed submit. The existing-application check
+  // is scoped to the CURRENT recruitment (so old withdrawn apps from prior
+  // cycles don't drive the UI).
   const [{ data: membership }, { data: adminRow }, { data: existing }] =
     await Promise.all([
       supabase
@@ -59,12 +70,14 @@ export default async function ApplyPage({
         .eq("club_id", club.id)
         .eq("profile_id", user.id)
         .maybeSingle(),
-      supabase
-        .from("applications")
-        .select("status")
-        .eq("club_id", club.id)
-        .eq("profile_id", user.id)
-        .maybeSingle(),
+      recruitment
+        ? supabase
+            .from("applications")
+            .select("status")
+            .eq("recruitment_id", recruitment.id)
+            .eq("profile_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null as { status: string } | null }),
     ]);
 
   const blockReason = membership
@@ -86,7 +99,7 @@ export default async function ApplyPage({
         Apply to {club.name}
       </h1>
       <p className="mb-8 mt-2 text-sm text-ink-soft">
-        {deadlineLabel(club.recruitment_deadline)}
+        {deadlineLabel(recruitment?.deadline ?? null)}
       </p>
 
       {blockReason ? (

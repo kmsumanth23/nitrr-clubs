@@ -9,10 +9,9 @@ import { getPhase } from "@/lib/phase";
 export type ApplicationResult = { error?: string; ok?: boolean };
 
 /**
- * Apply to a club. Allowed only in 'open' phase. Also handles re-apply:
- * if the student has a previous withdrawn/rejected/removed app for this
- * club within the current cycle, we update it back to pending. After
- * publish, the cycle is over and `removed` blocks re-apply (handled below).
+ * Apply: targets the club's CURRENT recruitment row. If the student already
+ * has an application for that recruitment in a revivable state, update it
+ * (re-apply within the same recruitment). The DB trigger enforces phase.
  */
 export async function submitApplication(
   _prev: ApplicationResult,
@@ -35,33 +34,34 @@ export async function submitApplication(
 
   const { data: club } = await supabase
     .from("clubs")
-    .select(
-      "slug, recruitment_deadline, result_date, results_published_at, is_recruiting",
-    )
+    .select("slug, is_recruiting")
     .eq("id", clubId)
     .maybeSingle();
   if (!club) return { error: "Club not found." };
-  if (!club.is_recruiting)
-    return { error: "This club is not currently recruiting." };
+  if (!club.is_recruiting) return { error: "This club is not currently recruiting." };
 
-  const phase = getPhase(club);
-  if (phase !== "open") {
-    return { error: "Applications are closed for this club." };
-  }
+  // Current recruitment for the club
+  const { data: rec } = await supabase
+    .from("recruitments")
+    .select("id, deadline, result_date, results_published_at")
+    .eq("club_id", clubId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!rec) return { error: "No active recruitment for this club." };
 
-  // If a previous app exists for this club from this user, re-use the row.
+  const phase = getPhase(rec);
+  if (phase !== "open") return { error: "Applications are closed for this recruitment." };
+
+  // Existing app for THIS recruitment? Revive (the trigger enforces phase).
   const { data: existing } = await supabase
     .from("applications")
-    .select("id, status")
-    .eq("club_id", clubId)
+    .select("id")
+    .eq("recruitment_id", rec.id)
     .eq("profile_id", user.id)
     .maybeSingle();
 
   if (existing) {
-    // Trust the trigger to enforce phase rules — if we're in a fresh open
-    // phase (new cycle), reviving any prior status (withdrawn / rejected /
-    // accepted / removed) is fine. The trigger will block this update
-    // outside open phase, and we surface that error to the user.
     const { error } = await supabase
       .from("applications")
       .update({ status: "pending", responses })
@@ -70,6 +70,7 @@ export async function submitApplication(
   } else {
     const { error } = await supabase.from("applications").insert({
       club_id: clubId,
+      recruitment_id: rec.id,
       profile_id: user.id,
       status: "pending",
       responses,
@@ -82,7 +83,7 @@ export async function submitApplication(
   redirect("/profile");
 }
 
-/** Student edits their own application. Allowed only in 'open' phase. */
+/** Edit own application. Open phase only. */
 export async function editApplication(
   _prev: ApplicationResult,
   formData: FormData,
@@ -90,13 +91,11 @@ export async function editApplication(
   const applicationId = formData.get("applicationId") as string;
   if (!applicationId) return { error: "Missing application id." };
 
-  const parsed = applicationSchema
-    .omit({ clubId: true })
-    .safeParse({
-      motivation: formData.get("motivation"),
-      experience: formData.get("experience"),
-      contribution: formData.get("contribution"),
-    });
+  const parsed = applicationSchema.omit({ clubId: true }).safeParse({
+    motivation: formData.get("motivation"),
+    experience: formData.get("experience"),
+    contribution: formData.get("contribution"),
+  });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   const supabase = await createClient();
@@ -108,19 +107,16 @@ export async function editApplication(
   const { data: app } = await supabase
     .from("applications")
     .select(
-      "id, profile_id, status, club:clubs(slug, recruitment_deadline, result_date, results_published_at)",
+      "id, profile_id, recruitment:recruitments(deadline, result_date, results_published_at)",
     )
     .eq("id", applicationId)
     .maybeSingle();
-  if (!app || app.profile_id !== user.id)
-    return { error: "Application not found." };
+  if (!app || app.profile_id !== user.id) return { error: "Application not found." };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const club: any = app.club;
-  const phase = getPhase(club);
-  if (phase !== "open") {
-    return { error: "You can no longer edit this application." };
-  }
+  const rec: any = app.recruitment;
+  const phase = getPhase(rec);
+  if (phase !== "open") return { error: "You can no longer edit this application." };
 
   const { error } = await supabase
     .from("applications")
@@ -132,7 +128,7 @@ export async function editApplication(
   return { ok: true };
 }
 
-/** Student withdraws their own application. Allowed only in 'open' phase. */
+/** Withdraw own application. Open phase only. */
 export async function withdrawApplication(
   _prev: ApplicationResult,
   formData: FormData,
@@ -149,19 +145,16 @@ export async function withdrawApplication(
   const { data: app } = await supabase
     .from("applications")
     .select(
-      "id, profile_id, status, club:clubs(recruitment_deadline, result_date, results_published_at)",
+      "id, profile_id, recruitment:recruitments(deadline, result_date, results_published_at)",
     )
     .eq("id", applicationId)
     .maybeSingle();
-  if (!app || app.profile_id !== user.id)
-    return { error: "Application not found." };
+  if (!app || app.profile_id !== user.id) return { error: "Application not found." };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const club: any = app.club;
-  const phase = getPhase(club);
-  if (phase !== "open") {
-    return { error: "You can no longer withdraw this application." };
-  }
+  const rec: any = app.recruitment;
+  const phase = getPhase(rec);
+  if (phase !== "open") return { error: "You can no longer withdraw this application." };
 
   const { error } = await supabase
     .from("applications")

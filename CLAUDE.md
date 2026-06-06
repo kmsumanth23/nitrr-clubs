@@ -1,196 +1,398 @@
-@AGENTS.md
-# CLAUDE.md — NITRR Clubs & Committees
+# NITRR Clubs — CLAUDE.md
 
-Guidance for Claude Code working in this repo. Read this first.
+The living source of truth for the NIT Raipur clubs & committees website rebuild. Update after every milestone. Skim the top sections when sitting down to work; read the deep sections before touching the relevant area.
 
-## What this project is
-A full rebuild of the NIT Raipur (NITRR) clubs & committees website: a guide for
-new students to discover every active club, browse events and a photo gallery, and
-apply to clubs they like. Replaces an old Create-React-App + Redux + static-HTML
-project.
+---
 
-Secondary goal: the owner is learning SWE/DevOps (HLD/LLD, SSR vs CSR, RLS, CI/CD)
-through this build. Prefer clear, conventional, well-structured code over clever
-code. Chat explanations should be **terse** unless asked to expand.
+## What we're building
 
-## Tech stack (locked)
-- **Next.js 16** App Router + **TypeScript** (Turbopack default; middleware is
-  exported as `proxy` from `proxy.ts`)
-- **Tailwind CSS** with custom design tokens
-- **shadcn/ui** + Radix for accessible primitives
-- **Framer Motion** for animation
-- **Supabase**: Postgres + Auth (email + Google OAuth; **no domain restriction**)
-  + Storage
-- **Postgres Row-Level Security** for authorization
-- **React Hook Form + Zod** for forms (same schema client + server)
-- **Vercel** hosting, **GitHub Actions** CI
+A modern full-stack rebuild of the NIT Raipur clubs/committees website. Replaces an aging Create React App + Redux + static HTML project. Two purposes:
 
-## Roles (locked at step 9)
+1. **A real production site** for NITRR clubs — public landing, club pages, events, gallery, recruitment workflow.
+2. **A learning project** in parallel — HLD/LLD, SSR/CSR rendering strategies, RLS, migrations, CI/CD.
 
-**Global role** (`profiles.role` enum): only `student` and `super_admin` are used.
-The enum still has `'admin'` for backwards compatibility but is no longer
-granted — authority comes from `club_admins` rows. (Postgres drops enum values
-painfully; we ignore the value instead of removing it.)
+Visual language reference: communitie.in/hyderabad. Borrowed in spirit, not 1:1.
 
-**Per-club tiers** (`club_admins.admin_role`):
-- **lead** — full control of their club, can manage other admins (4th-year)
-- **manager** — content + events + gallery + applications, no admin mgmt (4th-year)
-- **editor** — content only (no applications, no admin mgmt) (3rd-year)
+---
 
-Helper functions (defined in 09_roles.sql):
-- `club_tier(uuid)` → text, returns the tier on a club or null
-- `can_edit_club_content(uuid)` → editor+
-- `can_manage_applications(uuid)` → manager+
-- `can_manage_admins(uuid)` → lead only
-- `is_super_admin()` → boolean
-- `is_club_admin(uuid)` → kept as alias for `can_edit_club_content` (legacy)
+## Architecture
 
-**Invariants enforced by triggers:**
-- A student cannot apply to a club they admin OR are already a member of
-  (`trg_block_self_apply` on `applications`).
-- A club must always have ≥1 lead — can't delete or demote the last lead
-  (`trg_protect_last_lead` on `club_admins`).
+**Modular monolith.** One codebase, one Next.js deployment, but deliberate internal boundaries: `lib/queries/`, `lib/actions/`, `lib/validation/`, `components/<area>/`, `app/(<group>)/`. RLS is its own enforcement layer beneath the queries. The "modular" part means we could split — say, the admin area into a separate service — without a rewrite. We probably never will. The structure exists so changes stay local to their area.
 
-**Workflow:** 4th-year leads run a club for the year, then hand off to incoming
-4th-year juniors. Super_admin only intervenes if a club is decommissioning
-(removes all admins, deletes the club).
+**Tech stack (locked):**
+- Next.js 16 (App Router + Turbopack default) + TypeScript
+- Tailwind CSS + shadcn/ui + Radix + Framer Motion
+- Supabase: Postgres + Auth + Storage
+- Postgres RLS for authority enforcement
+- React Hook Form + Zod for forms
+- Vercel hosting, GitHub Actions CI
+- ESLint + Prettier
 
-**Multi-club admins allowed.** Edge case: blocked from applying to clubs they manage.
+**Next 16 quirks worth knowing:**
+- `middleware.ts` is renamed `proxy.ts`; export named `proxy`.
+- `cookies()` cannot be used inside `generateStaticParams` (runs at build time). Use `lib/supabase/static.ts` → `createStaticClient()` for cookies-free queries from build context.
+- `useFormState` is deprecated; use `useActionState` from React 19.
+- Turbopack is the default bundler; `.next` cache cleanup occasionally needed after migrations.
 
-**Year-restricted positions are deferred** — for v1 apply is generic to the club.
-When implemented later, will add a `club_positions` table and reshape the apply
-flow.
+**Auth:** Supabase Auth via Google OAuth + email/password. Sessions live in **HttpOnly cookies**, not localStorage. **Multi-account testing requires separate incognito windows per account.** Clearing localStorage does not sign anyone out.
 
-## Architecture (HLD)
-Layers: shared layouts → page components → reusable UI → data layer
-(`lib/supabase` clients + typed query functions in `lib/queries/*`).
-
-Rendering strategy (per route):
-- **SSG**: `/about`, `/faq`
-- **ISR**: `/`, `/clubs`, `/clubs/[slug]`, `/events`, `/events/[slug]`, `/gallery`
-- **SSR**: `/profile`, `/admin/*`
-- **CSR islands**: filter pills, forms, dashboards, gallery lightbox, navbar
-
-Rule: *does the page depend on who's looking?* No → static (SSG/ISR). Yes → SSR.
-Interactive bits within a page → Client Component islands.
-
-## Route map
-```
-app/
-  (marketing)/        # public
-    page.tsx            # / landing (10 sections)         [ISR]
-    clubs/page.tsx, clubs/[slug]/page.tsx                   [ISR]
-    events/page.tsx, events/[slug]/page.tsx                 [ISR]
-    gallery/page.tsx                                         [ISR]
-  (auth)/             # modal-based; OAuth callback
-    auth/callback/route.ts
-    auth/signout/route.ts
-  (student)/          # session-guarded
-    profile/page.tsx                                         [SSR]
-    profile/complete/page.tsx                                [SSR]
-    clubs/[slug]/apply/page.tsx                              [SSR]
-  (admin)/            # club_admins-guarded (built at 9b)
-    admin/page.tsx and sub-pages
-  proxy.ts            # Supabase session refresh
-```
-
-## Landing page (10 sections in scroll order)
-1. Frosted split-pill nav (sticky). 2. Hero + Stats (one full-screen unit).
-3. (merged into hero) 4. Explore clubs (fade-frost hover, 5 cards + All-Clubs).
-5. How it works (3 steps). 6. Events (5 upright graduated posters, hover tilt).
-7. Gallery MOMENTS (3 film strips, sprocket holes). 8. Socials. 9. FAQ.
-10. Final CTA + dark footer.
+---
 
 ## Design system
-Tokens in `tailwind.config.ts` + `app/globals.css`.
-- Surfaces: cream #F7F3EC, beige #F0EAE0, line #E4DCCF
-- Text: ink #1C1A17, ink-soft #6B6459
-- Primary: **indigo #5B52E0**
-- Warm accent: **clay #C26A4A** (placeholder; may swap to honey/sage later)
-- Fonts: **Bricolage Grotesque** (display) + **Geist Sans** (body)
-- Animation respects `prefers-reduced-motion`
-- Full-screen sections use `min-h-[100svh]` (mobile-safe vh)
 
-## Database (living doc; see supabase/*.sql)
-Hub: **clubs**. Tables:
-- `profiles` (extends auth.users; role enum, branch, year, roll_number, gender)
-- `categories` (Tech / Sports / Arts / Social / Professional / Culture)
-- `clubs` (slug, category_id, highlights[], is_recruiting, updated_by)
-- `club_admins` (authorization join: club_id + profile_id + admin_role tier)
-- `club_team` (display-only coordinators; may have no account)
-- `club_members` (the roster — created on application acceptance) [9a]
-- `events` (club_id, slug, starts_at, reg_open, reg_url, updated_by)
-- `applications` (club_id + profile_id unique, status enum, `responses` jsonb)
-- `gallery_photos` (club_id + optional event_id)
-- `faqs` (standalone)
+| Token | Hex |
+|---|---|
+| `cream` | `#F7F3EC` (page bg) |
+| `beige` | `#F0EAE0` |
+| `ink` | `#1C1A17` (text) |
+| `ink-soft` | `#6B6459` (secondary text) |
+| `line` | `#E4DCCF` (borders) |
+| `indigo` | `#5B52E0` (primary action) |
+| `clay` | `#C26A4A` (warm accent placeholder) |
 
-RLS pattern: content tables = public read; writes gated by tier helpers.
-Applications = student sees/inserts/updates own; manager+ reads/updates club's.
+**Fonts:** Bricolage Grotesque (display), Geist Sans (body).
 
-### Types workflow
-`lib/database.types.ts` is auto-generated — never hand-edit the main body.
-When adding a column: (1) run SQL migration, (2) run
-`npx supabase gen types typescript --project-id <id> > lib/database.types.ts`,
-(3) re-append the convenience alias block at the bottom of the file.
+**Vibe:** frosted-glass pill nav, rounded cards, heavy display type, gentle warm section rhythm, dark footer only. Frosted sidebar pill in admin views (hover-expands from icon strip to labels).
 
-### Google OAuth users
-OAuth users bypass the sign-up form and have `roll_number/branch/gender = null`.
-`/profile/complete` exists for them to fill in missing fields.
+**Undecided:** the warm accent. Terracotta `#C26A4A` is current placeholder; honey `#E0A82E` and sage `#7C8C6A` are candidates. Resolved in UI/UX pass.
 
-## Conventions
-- Path alias `@/*` → project root.
-- Supabase clients: `@/lib/supabase/client` (Client), `@/lib/supabase/server`
-  (Server / actions / route handlers). Both are tsconfig aliases — actual files
-  use double-underscore names (`supabase__server.ts`, `supabase__client.ts`).
-  `supabase__static.ts` — cookie-free client for `generateStaticParams` (build time).
-  Never use service-role key in client code.
-- Queries in `lib/queries/*` — pages call those, not raw Supabase inline.
-- Forms: Zod in `lib/validation/*`, shared by RHF (client) + server action.
-- Server Components by default; `"use client"` only for interactivity.
-- Tokens in httpOnly cookies via `@supabase/ssr` (never localStorage).
-- React 19 / Next 16: use `useActionState` (from `react`), NOT `useFormState`
-  (deprecated; in `react-dom`).
-- `useSearchParams()` must be in a component wrapped in `<Suspense>` — bare usage
-  in a layout/page blocks static rendering for every route that includes it.
-- File-creation gotcha: reserved names (`page.tsx`, `layout.tsx`, `route.ts`,
-  `proxy.ts`) MUST be exact. Component/helper files can be any name.
+---
 
-## Things to NOT do
-- No per-club hardcoded HTML — `/clubs/[slug]` template fed by the DB.
-- No Redux. No localStorage tokens. No committed build artifacts.
-- No inline style soup. Use Tailwind + tokens.
+## Role model
 
-## Build progress
-1. ✅ Scaffold + tooling
-2. ✅ Supabase: schema (01), RLS (02), seed (03), clients/middleware/types
-3. ✅ Design system + nav + footer
-4. ✅ Landing page (10 sections wired to Supabase)
-5. ✅ Clubs: /clubs list + filter, /clubs/[slug] detail
-6. ✅ Auth: modal + Google OAuth + callback + session-aware navbar + guards
-7. ✅ Apply flow: form + Zod + server action (RLS write) + profile completeness
-8. ✅ Events + Gallery pages (+ apply sign-in flow fix)
-9.  ⬜ Admin/Student dashboards — split into:
-    - 9a ✅ Student profile/dashboard (+ 09_roles.sql migration)
-    - 9b ✅ Admin shell + edit club content (uses tier helpers)
-    - 9c ⬜ Admin events management (CRUD)
-    - 9d ⬜ Admin applications review (accept → creates club_members row)
-    - 9e ⬜ Admin gallery upload (Supabase Storage + image resize)
-10. ⬜ Email notifications (Resend or similar; accept/reject emails)
-11. ⬜ Year-restricted positions (`club_positions` table + apply reshape)
-12. ⬜ Super-admin dashboard (create clubs, assign first lead, decommission)
-13. ⬜ Deploy: Vercel + GitHub Actions CI
+**Two independent dimensions.** A user's web authority and their roster membership in a club are **separate**.
 
-## Commands
-```bash
-npm run dev      # local
-npm run build    # prod build
-npm run lint     # eslint
-npx prettier -w .
+### Global roles (column: `profiles.role`)
+- `student` — default for any new account.
+- `super_admin` — system-wide bypass of RLS. Currently held by Gladiator only.
+- `admin` — legacy enum value, unused. Retained because the enum still has it; intentionally not granted to anyone.
+
+### Per-club tiers (column: `club_admins.admin_role`)
+- `lead` — Overall Coordinator IRL, full control + manages other admins.
+- `manager` — Head Coordinator, content + events + applications + gallery.
+- `editor` — Coordinator, content only (no applications, no members).
+
+A user is a club admin if-and-only-if they have a row in `club_admins`. The admin link in the navbar shows when `isClubAdmin || super_admin`.
+
+### Roster (column: `club_members`)
+Independent of admin tiers. A lead can exist without being a member. A member can exist without being an admin. **The two never auto-link.** Membership materializes only when a recruitment is published with their accepted application; removal flips the application status to `removed`.
+
+### Real-world position naming
+The web tiers (lead/manager/editor) correspond to real NITRR positions (Overall Coordinator / Head Coordinator / Coordinator / Volunteer for regular members). Position names will be surfaced via `club_team` on the public page in a future step. They're **distinct** from web tiers — admin tier controls *what you can do in the system*; member role controls *how you're displayed on the public site*.
+
+### Test accounts
+| Account | Email | Setup |
+|---|---|---|
+| Gladiator | `examplemail@gmail.com` (Test1234!) | super_admin + lead of Shaurya |
+| Sumanth | `sumanth@nitrr.ac.in` | student + 2nd lead of Shaurya |
+| Maximus | `maximus@nitrr.ac.in` | student + manager of Shaurya |
+| Spartan | `spartan@nitrr.ac.in` | student + editor of Shaurya |
+| Recruit | `recruit@nitrr.ac.in` (Test1234!) | pure student for apply-flow tests; CSE23010, year 2, CSE |
+
+---
+
+## Database schema (current)
+
+```
+profiles (id PK, email, full_name, role enum [student|admin|super_admin],
+          roll_number, year, branch, gender, created_at)
+
+categories (id PK, slug, name, sort_order)
+
+clubs (id PK, slug unique, name, tagline, description,
+       category_id FK, highlights text[], is_recruiting bool,
+       member_count int, instagram_url, linkedin_url,
+       community_whatsapp_link text,        -- revealed to members at publish (step 11)
+       updated_by FK, created_at, updated_at)
+
+club_admins (club_id FK, profile_id FK, admin_role enum [lead|manager|editor],
+             primary key (club_id, profile_id))
+
+club_members (club_id FK, profile_id FK, joined_at,
+              primary key (club_id, profile_id))
+
+club_team (id PK, club_id FK, name, position, photo_url, sort_order)
+  -- display-only; for public page coordinator listing
+
+recruitments (id PK, club_id FK, name,
+              deadline timestamptz, result_date timestamptz,
+              results_published_at, results_published_by FK,
+              interview_whatsapp_link text,   -- revealed at deadline (step 11)
+              interview_mode text CHECK in (online|offline|hybrid),
+              created_by FK, created_at)
+
+applications (id PK, club_id FK, profile_id FK,
+              recruitment_id FK NOT NULL,
+              status enum [pending|reviewing|accepted|rejected|withdrawn|removed],
+              responses jsonb, note text, note_by FK, note_at,
+              created_at, updated_at,
+              UNIQUE (recruitment_id, profile_id))
+
+events (id PK, club_id FK, slug unique, name, description,
+        starts_at, ends_at, location, image_url, created_at)
+
+gallery_photos (id PK, club_id FK, image_url, caption, sort_order, created_at)
+
+faqs (id PK, question, answer, is_published, sort_order)
 ```
 
-## Supabase setup recap
-SQL in order: 01_schema → 02_rls → 03_seed → (9a) 09_roles.
-Env vars in `.env.local`. Google OAuth redirect: `.../auth/callback`.
-After running schema SQL, grant table privileges to `anon` and `authenticated`
-roles — not done automatically via raw SQL. Without this, all queries return
-42501 even with correct RLS policies.
+### Key SQL functions
+- `recruitment_phase(uuid) → 'open' | 'review' | 'result'`
+  - `result` if `results_published_at IS NOT NULL`
+  - `open` if deadline null OR now < deadline
+  - `review` otherwise
+- `current_recruitment_for_club(club_id_in uuid) → uuid` — returns the most recent recruitment's id
+- `enforce_application_phase()` trigger — gates writes by phase. Honors `app.bypass_phase_check = 'true'` GUC for legitimate admin operations
+- `publish_recruitment_results(uuid)` — lead-only, gated on zero pending/reviewing, atomically materializes accepted apps into `club_members`
+- `start_new_recruitment(club_id, name, deadline, result_date, interview_whatsapp_link, interview_mode)` — lead/manager, gates on previous recruitment being in result phase
+- `remove_member(club_id, profile_id)` — SECURITY DEFINER, lead-only (super_admin override), atomic delete from `club_members` + flip application to `removed`. Uses the GUC bypass to satisfy the phase trigger.
+- Auth helpers: `is_super_admin()`, `can_edit_club_content(uuid)`, `can_manage_applications(uuid)`, `can_manage_admins(uuid)`, `club_tier(uuid)`, `is_club_admin(uuid)`
+
+---
+
+## Recruitment lifecycle (the core model)
+
+A `recruitments` row owns its own lifecycle. The clubs row is permanent metadata.
+
+```
+  ┌──────────┐   deadline    ┌────────────┐   publish    ┌──────────┐
+  │   OPEN   │ ────────────▶ │   REVIEW   │ ───────────▶ │  RESULT  │
+  └──────────┘   passes      └────────────┘  (lead-only) └──────────┘
+   • student CRUD              • admin decides            • locked
+   • no decisions              • student locked           • members materialized
+                               • interview WhatsApp        from accepteds
+                                 reveals (step 11)
+```
+
+- **Open phase:** student can apply, edit, withdraw. Admin reads + notes only.
+- **Review phase:** student locked. Admin accepts/rejects. Lead-only "publish" gated on zero remaining `pending|reviewing`.
+- **Result phase:** locked. Accepted applications materialize as `club_members` rows via the publish RPC.
+
+### Multi-cycle support
+Each "Start new recruitment" inserts a new `recruitments` row. The old row stays as history. Applications point to the recruitment they were submitted into. Students can re-apply in *future* recruitments (different row), not in the same one (unique constraint blocks).
+
+### Application status semantics
+- `pending` — submitted, undecided
+- `reviewing` — admin has glanced/started reviewing (organizing label only)
+- `accepted` / `rejected` — admin decision (visible to student only after publish)
+- `withdrawn` — student withdrew during open phase
+- `removed` — was accepted/member, then removed via `remove_member`
+
+### Status visibility to student
+During review phase, the student sees "Under review" *regardless* of the admin's decision. The actual accept/reject only appears post-publish. Enforced in `application-row.tsx` via the `displayStatus` function — the data is correct, the UI masks it.
+
+---
+
+## Recruitment workflow (the operational model)
+
+How recruitment actually plays out, mapping system features to real-world steps:
+
+1. **Open phase (apply window).** Lead/manager opens a recruitment (creates `recruitments` row with deadline, result_date, interview mode, interview WhatsApp link). Students apply. The interview WhatsApp link is stored but NOT shown yet.
+2. **Deadline passes → review phase.** Students locked out. Interview WhatsApp link revealed to applicants on their `/profile` (step 11 surfaces this). Admins coordinate interviews off-system via that group.
+3. **Review phase (decisions).** Admin marks applications accepted/rejected. Status changes visible to admin but masked from student.
+4. **Finalize.** Lead reviews — all applications must be decided (zero pending/reviewing remaining).
+5. **Publish.** Lead clicks publish. Atomic: recruitment marked published, accepted applications become `club_members` rows. Community WhatsApp link revealed on the accepted students' `/profile` (step 11).
+
+Why this workflow: it mirrors what NITRR clubs already do (Google Forms → Excel → WhatsApp coordination → manual shortlist → another WhatsApp group). The system replaces the scattered tools with one place, but doesn't force a new operating model.
+
+### What's NOT in scope
+- **Waitlisted** — covered by `reviewing` status; no separate state.
+- **In-app interview scheduling** — happens off-system in WhatsApp. The system just reveals the right link at the right phase.
+- **Cross-cycle analytics** — deferred to a later step if needed.
+- **Carryover applications across cycles** — students re-submit fresh in each recruitment.
+
+---
+
+## Routes & rendering strategy
+
+| Group | Routes | Strategy |
+|---|---|---|
+| `(marketing)` | `/`, `/clubs`, `/clubs/[slug]`, `/events`, `/events/[slug]`, `/gallery`, `/about`, `/faq`, `/contact` | ISR for home/clubs/events; SSG for about/faq |
+| `(marketing)` | `/clubs/[slug]/apply` | SSR with auth gate |
+| `(auth)` | Sign-in modal + `/auth/callback` | client |
+| `(student)` | `/profile` | SSR with auth gate |
+| `(admin)` | `/admin`, `/admin/clubs/[slug]`, `/admin/clubs/[slug]/events`, `/admin/clubs/[slug]/applications`, `/admin/clubs/[slug]/members`, `/admin/clubs/[slug]/gallery` | SSR with auth + tier gate |
+
+CSR islands inside SSR pages: filter pills, edit forms, modals, drag-and-drop, dashboards.
+
+**Auth gate pattern:** route group's `layout.tsx` does session check → calls a query that hits RLS as a second gate. Two layers cover each other (UI shouldn't be the only enforcement).
+
+---
+
+## What's done and what's left
+
+### Done (steps 1-9f)
+- **1-4:** Scaffold, Supabase schema/RLS/seed/clients, design system + nav + footer, full landing page (10 sections wired to Supabase)
+- **5:** Public clubs listing + detail pages
+- **6:** Auth (Google OAuth code path; console setup pending)
+- **7:** Public events pages
+- **8:** Gallery placeholder page (static; upload comes in 9e)
+- **9a:** Student profile + applications list
+- **9b:** Admin shell + edit-club content + club_admins-based authority
+- **9c:** Admin events CRUD + floating glass sidebar pill + unsaved-changes guard
+- **9d:** Admin applications review
+- **9d-fixes:** Three-phase model (open/review/result), publish RPC, status masking, membership-at-publish-only
+- **9f-1:** Recruitments table migration; data + queries + actions threaded through; phase functions renamed
+- **9f-2:** Start new recruitment + Remove member UI; community WhatsApp link field; GUC trigger bypass
+- **9f-3:** Active vs History split on /profile (collapsed by default); Current/History tabs on admin applications page (history grouped by recruitment)
+
+### Left
+| Step | Description |
+|---|---|
+| **9e** | Gallery upload (Supabase Storage bucket + upload action + admin gallery page) |
+| **10** | Email notifications on accept/reject/publish (SendGrid or Resend) |
+| **11** | Year-restricted positions + per-position custom questions + interview WhatsApp reveal + community WhatsApp reveal on profile |
+| **12** | Sysadmin panel + club admin assignment UI (replaces manual `insert into club_admins` SQL) |
+| **13** | Deploy (Vercel + GH Actions CI) |
+| **UI/UX pass** | Mobile redesigns, restore club-card style on My clubs (currently inline plain list), real photos, font polish, accent color decision, custom badges (distinct super_admin tag) |
+
+---
+
+## Step 11 — design locked
+
+When we get there, the workflow is **per-position with year eligibility** (option B from our decision):
+
+- One `recruitment` has multiple **positions** (new table `recruitment_positions`)
+- Each position has `eligibility_min_year`, `eligibility_max_year`, `title`, `openings_count`
+- Each position has its own **custom question set** (`position_questions` table — prompt, order, required). Default 3 questions, lead can add/remove freely.
+- Student sees only **eligible positions** on the club page (filter by their year)
+- Application points to a position via new column `applications.position_id` (nullable until step 11 lands, then enforced after backfill)
+- Admin review groups applications by position
+- Interview WhatsApp link is revealed on student `/profile` once the recruitment enters review phase (only to applicants of that recruitment)
+- Community WhatsApp link revealed on `/profile` to accepted members only, post-publish
+
+Schema for step 11:
+```sql
+recruitment_positions (
+  id, recruitment_id FK, title, openings_count int,
+  eligibility_min_year int, eligibility_max_year int,
+  created_at
+)
+
+position_questions (
+  id, position_id FK, prompt text, sort_order int, required bool
+)
+
+applications.position_id uuid FK references recruitment_positions(id)
+  -- nullable; in step 11 we'll backfill existing apps to an implicit
+  -- "Volunteer" position per recruitment, then make NOT NULL
+```
+
+---
+
+## Step 12 — admin management UI (planned)
+
+Replaces all current SQL maintenance for club admins.
+
+- New page `/admin/clubs/[slug]/admins` — lead/super_admin only
+- List current admins with tier, change tier, remove
+- "Add admin" — search profiles by name/email/roll, pick tier, confirm
+- Last-lead trigger already exists; UI surfaces the "can't remove only lead" message
+- New sysadmin section visible to super_admin: create club, decommission club, promote/demote super_admin, system-wide views
+
+---
+
+## Working approach & lessons baked in
+
+### Build cadence
+- Incremental, step-ordered build. Each step ships a `SETUP_STEP*.md` file map + run instructions + smoke test path.
+- Only re-output files that actually change. The user copies them to the project.
+- Terse explanations preferred — code + run instructions, minimal prose.
+- Complex reconciliation tasks (migration aftermath, catching cascading gaps) handed off to Claude Code in VS Code with a written handoff doc.
+
+### Lessons baked in (revisit before relevant work)
+
+1. **RLS is a safety net, not a query filter.** Always add explicit `.eq("profile_id", user.id)` / `.eq("club_id", clubId)` / `.eq("recruitment_id", recId)` in queries. RLS policies use OR semantics — a "student reads own" policy plus an "admin reads club" policy fires both for super-admins, leaking other people's data when the query doesn't scope. *(From the 9a applications-leak bug.)*
+
+2. **GRANTs and RLS are two separate layers.** Every new table or new write privilege needs a base-table GRANT to `authenticated` AND an RLS policy. Forgetting GRANT yields "permission denied" even with passing RLS. *(From the 9b club-edit bug.)*
+
+3. **Trigger/constraint/function names must be verified against `information_schema` before writing drops.** Never assume the name matches what was written in your migration SQL — a lurking `enforce_application_deadline` with a mismatched name caused a hard-to-trace bug in 9f-1. Always: `select trigger_name from information_schema.triggers where event_object_table = 'tablename'` and compare. *(From the 9f-1 trigger error.)*
+
+4. **Migrations need to disable downstream triggers during data moves.** If a trigger reads columns you're about to drop, the trigger will fire during the migration's data updates and fail. Wrap data-mutation in `alter table X disable trigger T` / `enable trigger T`. *(From the original 9f-1 migration crash.)*
+
+5. **When rewriting files after a migration, preserve existing export surfaces.** Surgical internal edits where columns moved, NOT full rewrites from scratch. Breaking this twice in 9f-1 (dropped `getCategories`, `getAllClubSlugs`, the 5 home queries) caused cascading "module has no export X" errors. Audit consumers via grep before rewriting. *(From the 9f-1 aftermath.)*
+
+6. **`cookies()` cannot be used inside `generateStaticParams`** (Next 16 strict enforcement). Use `lib/supabase/static.ts` → `createStaticClient()` for cookies-free queries from build context.
+
+7. **Nested `<form>` elements cause hydration errors.** Any modal containing a form must render OUTSIDE any parent form in the DOM tree. Surgical fix: move the modal-trigger above/outside the parent form. Long-term: wrap modals in a React Portal. *(From the 9f-2 club-edit form bug.)*
+
+8. **The navbar's auth check must use the right authority source.** Checking a role enum instead of `club_admins` membership caused admin links to silently disappear for club admins in 9b. Always remember: authority lives in `club_admins`, not in `profiles.role`. *(From the 9b navbar dropdown bug.)*
+
+9. **The three-phase recruitment model prevents stale membership state.** Don't materialize membership at accept-click — only at publish. This avoids the "student withdraws their accepted-but-not-published app and breaks re-apply" class of bug. *(From the 9d revert-from-accepted bug.)*
+
+10. **Multi-account testing requires separate incognito windows.** Supabase auth lives in HttpOnly cookies, not localStorage. Clearing localStorage doesn't sign you out. *(From a half-day session-leak misinvestigation that turned out to be a real RLS leak.)*
+
+11. **Custom Postgres GUCs (with a dot prefix) don't need superuser privilege.** Use `set_config('app.bypass_phase_check', 'true', true)` for function-level signals to triggers. This replaces the `session_replication_role = replica` approach which would have needed superuser. *(From the 9f-2 remove_member trigger conflict.)*
+
+### File-shipping conventions
+- Files named with `__` as path separator when flat (e.g. `marketing__page.tsx` = `app/(marketing)/page.tsx`)
+- Reserved Next names must stay exact: `page.tsx`, `layout.tsx`, `route.tsx`, `proxy.ts`
+- Helper/component files preserve real paths: `ui__pill.tsx` → `components/ui/pill.tsx`
+- Setup file is always called `SETUP_STEP<N>.md`
+
+### Dev/maintenance recipe
+- Clear `.next` after schema migrations (Turbopack caches aggressively)
+- Run `tsc --noEmit` after batch file drops
+- Run `grep -rn "<dropped column>" lib/ components/ app/ --include="*.ts" --include="*.tsx"` after dropping any column to find lingering references
+- When a query file is rewritten, run `grep "^export" lib/queries/<file>.ts` to see its current export surface; compare against `import` statements in consumers
+
+### Manual SQL maintenance reference
+For emergencies (UI not yet available), here are the patterns:
+
+```sql
+-- Force-clear a publish stamp (workaround if start-new-recruitment isn't fitting)
+update recruitments
+set results_published_at = null, results_published_by = null
+where id = current_recruitment_for_club(
+  (select id from clubs where slug = 'shaurya')
+);
+
+-- Manually flip an application status (bypass trigger via GUC)
+select set_config('app.bypass_phase_check', 'true', false);
+update applications set status = 'removed' where id = '<uuid>';
+
+-- Check current recruitment for a club by slug (avoid bare UUIDs)
+select r.* from recruitments r
+join clubs c on c.id = r.club_id
+where c.slug = 'shaurya'
+order by r.created_at desc;
+
+-- Find all triggers on a table (before writing any drops!)
+select trigger_name, action_statement
+from information_schema.triggers
+where event_object_table = 'applications';
+```
+
+---
+
+## Smoke test reference (post-9f)
+
+End-to-end recruitment cycle test (catches most regressions in ~5 min):
+
+1. **As Gladiator (super_admin + lead of Shaurya):**
+   - `/admin/clubs/shaurya` → if previous recruitment is published, "Start new recruitment" button visible. Click → fill modal → submit → page reloads with new recruitment.
+   - Set deadline ~2 min future, result_date ~5 min future. Save.
+2. **As Recruit (incognito window 2):**
+   - `/clubs/shaurya` → Apply button enabled.
+   - Submit application → `/profile` shows the application under Active with "Pending" status.
+3. **Wait for deadline to pass.** Refresh both windows.
+4. **As Recruit:** application now shows "Under review" status. View modal says "can't be edited."
+5. **As Gladiator:** `/admin/clubs/shaurya/applications` → phase banner says "Review phase". Accept Recruit's application.
+6. **As Recruit:** refresh `/profile` → still "Under review" (status masked until publish). "My clubs" empty.
+7. **As Gladiator:** publish panel shows "Ready to publish." Click → confirm → publish.
+8. **As Recruit:** refresh `/profile` → application now shows "Accepted" (and is in History since the recruitment is now published). Shaurya appears in "My clubs."
+9. **As Gladiator:** `/admin/clubs/shaurya/members` → Recruit is in the roster. Click Remove → confirm.
+10. **As Recruit:** refresh `/profile` → Shaurya gone from "My clubs". Old application shows "Removed" status in History.
+11. **As Recruit:** try to apply to Shaurya's current open recruitment → if you started a new one in step 1, it works (new application row, new recruitment). If you didn't, blocked correctly.
+
+---
+
+## Open small flags (not blocking, deferred)
+
+- Switch club popover positioning works via `fixed` + `getBoundingClientRect`; may have edge cases on resize/scroll
+- Super_admin shows generic "Lead" tag on clubs they don't formally admin — should show distinct "Super_admin" badge (cosmetic, UI/UX pass)
+- `useUser` hook can briefly flip to "not logged in" on transient network errors → sign-in modal pops up; should preserve previous state on transient errors (defer to polish pass)
+- My clubs section currently renders as a plain inline list; previous club-card aesthetic to be restored in UI/UX pass
+- Mobile-specific section redesigns deferred
+- Real photos, font polishing deferred
+- Google OAuth console setup pending (code path done since step 6)

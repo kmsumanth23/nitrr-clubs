@@ -36,5 +36,5 @@ export async function getAllEventSlugs(): Promise<string[]> {
   const supabase = createStaticClient();
   const { data, error } = await supabase.from("events").select("slug");
   if (error) throw error;
-  return (data ?? []).map((e) => e.slug);
+  return (data ?? []).map((e: { slug: string }) => e.slug);
 }

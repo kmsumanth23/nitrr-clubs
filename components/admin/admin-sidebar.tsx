@@ -7,6 +7,7 @@ import {
   IconPencil,
   IconCalendarEvent,
   IconFileText,
+  IconUsers,
   IconPhoto,
   IconArrowsLeftRight,
   IconExternalLink,
@@ -22,14 +23,6 @@ interface ClubItem {
   tier: Tier;
 }
 
-/**
- * Floating glass sidebar — only rendered inside /admin/clubs/<slug>/...
- * Collapsed: icon-only pill (~52px). Hover: expands to ~210px showing labels.
- * Frosted-glass styling matches the navbar pills.
- *
- * Active section is highlighted. Editors don't get the Applications link
- * (RLS would 404 them; cleaner to hide).
- */
 export function AdminSidebar({
   slug,
   clubName,
@@ -55,14 +48,24 @@ export function AdminSidebar({
   }, []);
 
   const base = `/admin/clubs/${slug}`;
-  const sections = [
+  const sections: { href: string; icon: typeof IconPencil; label: string }[] = [
     { href: base, icon: IconPencil, label: "Edit" },
     { href: `${base}/events`, icon: IconCalendarEvent, label: "Events" },
-    ...(myTier !== "editor"
-      ? [{ href: `${base}/applications`, icon: IconFileText, label: "Applications" }]
-      : []),
-    { href: `${base}/gallery`, icon: IconPhoto, label: "Gallery" },
   ];
+  // applications + members hidden from editors
+  if (myTier !== "editor") {
+    sections.push({
+      href: `${base}/applications`,
+      icon: IconFileText,
+      label: "Applications",
+    });
+    sections.push({
+      href: `${base}/members`,
+      icon: IconUsers,
+      label: "Members",
+    });
+  }
+  sections.push({ href: `${base}/gallery`, icon: IconPhoto, label: "Gallery" });
 
   function isActive(href: string) {
     if (href === base) return pathname === base;
@@ -78,7 +81,6 @@ export function AdminSidebar({
           "group-hover:w-[210px] group-hover:rounded-3xl",
         )}
       >
-        {/* header: managing X + back to dashboard */}
         <div className="flex flex-shrink-0 items-center gap-2 px-3 py-3">
           <Link
             href="/admin"
@@ -91,15 +93,12 @@ export function AdminSidebar({
             <div className="truncate text-[10px] uppercase tracking-wide text-ink-soft">
               Managing
             </div>
-            <div className="truncate text-xs font-semibold text-ink">
-              {clubName}
-            </div>
+            <div className="truncate text-xs font-semibold text-ink">{clubName}</div>
           </div>
         </div>
 
         <div className="h-px bg-line/70" />
 
-        {/* sections */}
         <nav className="flex flex-col gap-1 p-2">
           {sections.map((s) => {
             const active = isActive(s.href);
@@ -125,7 +124,6 @@ export function AdminSidebar({
 
         <div className="h-px bg-line/70" />
 
-        {/* utilities */}
         <div className="flex flex-col gap-1 p-2">
           {myClubs.length > 1 && (
             <div ref={switchRef} className="relative">
@@ -140,9 +138,10 @@ export function AdminSidebar({
               </button>
               {switchOpen && (
                 <div
-                  className="fixed z-[60] w-56 max-h-[60vh] overflow-y-auto rounded-2xl border border-line bg-white py-1 shadow-soft"
+                  className="fixed z-[60] max-h-[60vh] w-56 overflow-y-auto rounded-2xl border border-line bg-white py-1 shadow-soft"
                   style={{
-                    left: (switchRef.current?.getBoundingClientRect().right ?? 0) + 8,
+                    left:
+                      (switchRef.current?.getBoundingClientRect().right ?? 0) + 8,
                     top: switchRef.current?.getBoundingClientRect().top ?? 0,
                   }}
                 >

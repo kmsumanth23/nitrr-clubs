@@ -6,17 +6,12 @@ import { useFormStatus } from "react-dom";
 import { Modal } from "@/components/ui/modal";
 import { publishResults, type ReviewResult } from "@/lib/actions/admin-application";
 
-/**
- * Publish results — only rendered for leads (or super_admin); the SQL RPC
- * is the actual authority. Disabled when there are still pending/reviewing
- * apps. Click → confirmation → publishes.
- */
 export function PublishResultsButton({
-  clubId,
+  recruitmentId,
   clubSlug,
   remainingCount,
 }: {
-  clubId: string;
+  recruitmentId: string;
   clubSlug: string;
   remainingCount: number;
 }) {
@@ -30,7 +25,7 @@ export function PublishResultsButton({
   React.useEffect(() => {
     if (state.ok) {
       setOpen(false);
-      window.location.reload(); // simplest way to flip the whole UI to result-phase
+      window.location.reload();
     }
   }, [state.ok]);
 
@@ -51,7 +46,7 @@ export function PublishResultsButton({
 
       <Modal open={open} onClose={() => setOpen(false)}>
         <form action={formAction} className="space-y-4">
-          <input type="hidden" name="clubId" value={clubId} />
+          <input type="hidden" name="recruitmentId" value={recruitmentId} />
           <input type="hidden" name="__club_slug" value={clubSlug} />
           <h3 className="font-display text-lg font-bold text-ink">
             Publish results?
@@ -60,9 +55,7 @@ export function PublishResultsButton({
             All applicants will see their results. Accepted students become
             club members immediately. This action cannot be undone.
           </p>
-          {state.error && (
-            <p className="text-xs text-clay">{state.error}</p>
-          )}
+          {state.error && <p className="text-xs text-clay">{state.error}</p>}
           <div className="flex gap-2">
             <ConfirmBtn />
             <button

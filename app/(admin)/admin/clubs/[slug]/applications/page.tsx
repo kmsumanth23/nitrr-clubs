@@ -5,8 +5,12 @@ import { getEditableClub } from "@/lib/queries/admin";
 import {
   getApplicationsForClub,
   getApplicationCountsForClub,
+  getApplicationHistoryForClub,
 } from "@/lib/queries/admin-applications";
-import { ApplicationsFilter } from "@/components/admin/applications-filter";
+import {
+  ApplicationsFilter,
+  ApplicationsTabsView,
+} from "@/components/admin/applications-filter";
 import { PublishResultsButton } from "@/components/admin/publish-results-button";
 import { getPhase, phaseLabel, PHASE_BADGE } from "@/lib/phase";
 
@@ -20,64 +24,47 @@ export default async function AdminApplicationsPage({
   const { slug } = await params;
   const data = await getEditableClub(slug);
   if (!data) notFound();
-
   const { club, tier } = data;
 
-  // editors can't review apps
-  if (tier === "editor") {
-    redirect(`/admin/clubs/${slug}`);
+  if (tier === "editor") redirect(`/admin/clubs/${slug}`);
+
+  const [{ applications, recruitment }, counts, historyGroups] =
+    await Promise.all([
+      getApplicationsForClub(club.id),
+      getApplicationCountsForClub(club.id),
+      getApplicationHistoryForClub(club.id),
+    ]);
+
+  if (!recruitment) {
+    return (
+      <section>
+        <Link
+          href={`/admin/clubs/${slug}`}
+          className="mb-4 inline-flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink"
+        >
+          <IconArrowLeft size={14} /> Edit {club.name}
+        </Link>
+        <h1 className="text-3xl font-extrabold tracking-tight text-ink">
+          Applications
+        </h1>
+        <p className="mt-4 rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
+          No recruitment has been opened for {club.name} yet. Start one from
+          the club&apos;s edit page.
+        </p>
+      </section>
+    );
   }
 
-  const [applications, counts] = await Promise.all([
-    getApplicationsForClub(club.id),
-    getApplicationCountsForClub(club.id),
-  ]);
-
-  // phase from the club's own fields (already on `club`)
-  const phase = getPhase({
-    recruitment_deadline: club.recruitment_deadline,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    result_date: (club as any).result_date,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    results_published_at: (club as any).results_published_at,
-  });
-
-  const remainingCount =
-    (counts.pending ?? 0) + (counts.reviewing ?? 0);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const resultDateIso = (club as any).result_date as string | null;
+  const phase = getPhase(recruitment);
+  const remainingCount = (counts.pending ?? 0) + (counts.reviewing ?? 0);
   const resultPastDue =
     phase === "review" &&
-    resultDateIso &&
-    new Date() > new Date(resultDateIso);
-  const canPublish = tier === "lead"; // managers can't publish
+    recruitment.result_date &&
+    new Date() > new Date(recruitment.result_date);
+  const canPublish = tier === "lead";
 
-  return (
-    <section>
-      <Link
-        href={`/admin/clubs/${slug}`}
-        className="mb-4 inline-flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink"
-      >
-        <IconArrowLeft size={14} /> Edit {club.name}
-      </Link>
-
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-ink">
-            Applications
-          </h1>
-          <p className="mt-1 text-sm text-ink-soft">
-            Review applications to {club.name}.
-          </p>
-        </div>
-        <span
-          className={`rounded-full px-3 py-1 text-xs font-medium ${PHASE_BADGE[phase]}`}
-        >
-          {phaseLabel(phase)}
-        </span>
-      </div>
-
-      {/* phase banner */}
+  const currentView = (
+    <>
       <div className="mb-6 rounded-2xl border border-line bg-white p-4 text-sm">
         {phase === "open" && (
           <p className="text-ink-soft">
@@ -98,11 +85,11 @@ export default async function AdminApplicationsPage({
                 — applicants are waiting.
               </p>
             )}
-            {!resultPastDue && resultDateIso && (
+            {!resultPastDue && recruitment.result_date && (
               <p>
                 Target result date:{" "}
                 <span className="font-medium text-ink">
-                  {new Date(resultDateIso).toLocaleString("en-IN")}
+                  {new Date(recruitment.result_date).toLocaleString("en-IN")}
                 </span>
               </p>
             )}
@@ -116,7 +103,6 @@ export default async function AdminApplicationsPage({
         )}
       </div>
 
-      {/* publish panel — only for leads in review phase */}
       {phase === "review" && canPublish && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
           <div className="min-w-0">
@@ -128,7 +114,7 @@ export default async function AdminApplicationsPage({
             </div>
           </div>
           <PublishResultsButton
-            clubId={club.id}
+            recruitmentId={recruitment.id}
             clubSlug={slug}
             remainingCount={remainingCount}
           />
@@ -144,7 +130,48 @@ export default async function AdminApplicationsPage({
         applications={applications}
         counts={counts}
         clubSlug={slug}
-        phase={phase}
+        phase={phase ?? "open"}
+      />
+    </>
+  );
+
+  return (
+    <section>
+      <Link
+        href={`/admin/clubs/${slug}`}
+        className="mb-4 inline-flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink"
+      >
+        <IconArrowLeft size={14} /> Edit {club.name}
+      </Link>
+
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink">
+            Applications
+          </h1>
+          <p className="mt-1 text-sm text-ink-soft">
+            Review applications to {club.name}
+            {recruitment.name && (
+              <>
+                {" "}— <span className="text-ink">{recruitment.name}</span>
+              </>
+            )}
+            .
+          </p>
+        </div>
+        {phase && (
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-medium ${PHASE_BADGE[phase]}`}
+          >
+            {phaseLabel(phase)}
+          </span>
+        )}
+      </div>
+
+      <ApplicationsTabsView
+        currentView={currentView}
+        historyGroups={historyGroups}
+        clubSlug={slug}
       />
     </section>
   );

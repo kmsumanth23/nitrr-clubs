@@ -31,20 +31,11 @@ async function ensureCanManageApplications(
   const canManage = isSuper || tier === "manager" || tier === "lead";
   if (!canManage)
     return { ok: false, error: "You don't have access to manage applications." };
-
   return { ok: true, userId: user.id };
 }
 
-/**
- * Set an application's status. Phase-aware:
- *  - open: only pending/reviewing allowed (no decisions); the trigger also
- *    catches this, but the action gives a friendlier error.
- *  - review: free movement between pending/reviewing/accepted/rejected.
- *  - result: locked (super_admin bypass at the DB layer).
- *
- * Critical change from original 9d: this no longer inserts into club_members
- * on accept. Membership is materialized only at publish time.
- */
+/** Set status. Phase-aware (decisions only in review). No club_members write —
+ *  that happens at publish-time via the RPC. */
 export async function setApplicationStatus(
   _prev: ReviewResult,
   formData: FormData,
@@ -62,7 +53,7 @@ export async function setApplicationStatus(
   const { data: app } = await supabase
     .from("applications")
     .select(
-      "club_id, status, club:clubs(recruitment_deadline, result_date, results_published_at)",
+      "club_id, status, recruitment:recruitments(deadline, result_date, results_published_at)",
     )
     .eq("id", applicationId)
     .maybeSingle();
@@ -71,16 +62,14 @@ export async function setApplicationStatus(
   const auth = await ensureCanManageApplications(app.club_id);
   if (!auth.ok) return { error: auth.error };
 
-  if (app.status === "withdrawn") {
+  if (app.status === "withdrawn")
     return { error: "This application was withdrawn by the student." };
-  }
-  if (app.status === "removed") {
+  if (app.status === "removed")
     return { error: "This member was removed; status cannot change here." };
-  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const club: any = app.club;
-  const phase = getPhase(club);
+  const rec: any = app.recruitment;
+  const phase = getPhase(rec);
   if (phase === "open") {
     return {
       error:
@@ -102,7 +91,6 @@ export async function setApplicationStatus(
   return { ok: true };
 }
 
-/** Save an internal note on an application. Stamps note_by + note_at. */
 export async function saveApplicationNote(
   _prev: ReviewResult,
   formData: FormData,
@@ -139,21 +127,20 @@ export async function saveApplicationNote(
 }
 
 /**
- * Publish results — lead-only (enforced in the SQL RPC). Calls the
- * publish_club_results function which gates on no pending/reviewing left
- * and materializes club_members rows for accepted apps.
+ * Publish results — now calls the RECRUITMENT RPC. The action receives
+ * recruitment_id (the page passes it).
  */
 export async function publishResults(
   _prev: ReviewResult,
   formData: FormData,
 ): Promise<ReviewResult> {
-  const clubId = formData.get("clubId") as string;
+  const recruitmentId = formData.get("recruitmentId") as string;
   const clubSlug = formData.get("__club_slug") as string;
-  if (!clubId) return { error: "Missing club id." };
+  if (!recruitmentId) return { error: "Missing recruitment id." };
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("publish_club_results", {
-    club_id_in: clubId,
+  const { error } = await supabase.rpc("publish_recruitment_results", {
+    recruitment_id_in: recruitmentId,
   });
   if (error) return { error: error.message };
 

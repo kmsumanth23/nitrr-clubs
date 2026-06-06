@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-/** Editable club fields. Now includes result_date alongside recruitment_deadline. */
 export const clubEditSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(2, "Name is required").max(120),
@@ -14,6 +13,13 @@ export const clubEditSchema = z.object({
   member_count: z.coerce.number().int().min(0).max(100000).nullable().optional(),
   instagram_url: z.string().url().nullable().optional().or(z.literal("")),
   linkedin_url: z.string().url().nullable().optional().or(z.literal("")),
+  community_whatsapp_link: z
+    .string()
+    .url()
+    .max(500)
+    .nullable()
+    .optional()
+    .or(z.literal("")),
 });
 
 export type ClubEditInput = z.infer<typeof clubEditSchema>;
