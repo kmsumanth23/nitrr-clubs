@@ -39,13 +39,15 @@ export async function getFaqs(): Promise<Faq[]> {
   return data ?? [];
 }
 
-/** Gallery image URLs for the marquee. */
+/** Gallery image URLs for the marquee.
+ *  Now filters by show_on_homepage = true so clubs can opt photos out. */
 export async function getGalleryImages(limit = 16): Promise<string[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("gallery_photos")
     .select("image_url")
-    .order("sort_order", { ascending: true })
+    .eq("show_on_homepage", true)
+    .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return (data ?? []).map((r) => r.image_url);
@@ -58,10 +60,6 @@ export interface SiteStats {
   categories: number;
 }
 
-/**
- * Live counts for the stats capsule. `head: true` + `count: "exact"` returns
- * only the count, not rows. members = sum of member_count across all clubs.
- */
 export async function getSiteStats(): Promise<SiteStats> {
   const supabase = await createClient();
 

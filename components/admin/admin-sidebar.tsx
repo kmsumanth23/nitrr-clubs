@@ -65,6 +65,7 @@ export function AdminSidebar({
       label: "Members",
     });
   }
+  // gallery visible to all tiers (editors manage content too)
   sections.push({ href: `${base}/gallery`, icon: IconPhoto, label: "Gallery" });
 
   function isActive(href: string) {

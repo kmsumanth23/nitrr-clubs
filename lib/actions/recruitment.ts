@@ -39,6 +39,9 @@ export async function startNewRecruitment(
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   const supabase = await createClient();
+  // The generated RPC types mark these args as non-null `string`, but the SQL
+  // function accepts NULL (it uses coalesce/nullif internally). Cast to bypass
+  // the incorrect type until types regen catches up.
   const { error } = await supabase.rpc("start_new_recruitment", {
     club_id_in: parsed.data.club_id,
     name_in: parsed.data.name ?? null,
@@ -46,7 +49,7 @@ export async function startNewRecruitment(
     result_date_in: parsed.data.result_date ?? null,
     interview_whatsapp_link_in: parsed.data.interview_whatsapp_link ?? null,
     interview_mode_in: parsed.data.interview_mode ?? null,
-  });
+  } as never);
   if (error) return { error: error.message };
 
   revalidatePath(`/admin/clubs/${clubSlug}`);

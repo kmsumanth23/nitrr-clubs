@@ -407,6 +407,7 @@ export type Database = {
           event_id: string | null
           id: string
           image_url: string
+          show_on_homepage: boolean
           sort_order: number
         }
         Insert: {
@@ -416,6 +417,7 @@ export type Database = {
           event_id?: string | null
           id?: string
           image_url: string
+          show_on_homepage?: boolean
           sort_order?: number
         }
         Update: {
@@ -425,6 +427,7 @@ export type Database = {
           event_id?: string | null
           id?: string
           image_url?: string
+          show_on_homepage?: boolean
           sort_order?: number
         }
         Relationships: [
@@ -561,6 +564,8 @@ export type Database = {
         Args: { target_club: string }
         Returns: boolean
       }
+      can_manage_gallery: { Args: { club_id_in: string }; Returns: boolean }
+      club_id_from_slug: { Args: { slug_in: string }; Returns: string }
       club_tier: { Args: { target_club: string }; Returns: string }
       current_recruitment_for_club: {
         Args: { club_id_in: string }

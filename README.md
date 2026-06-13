@@ -90,3 +90,9 @@ even when there are no applications the publish result is shown fix that
 manager should be able to get the list of all the members in the club. download as pdf same for number of applicants to check if they have joined the group
 
 super admins should also have ability to create clubs
+
+rewrite and redirect for unautherized link access.
+
+admin should be able to create any type of event. ex shaurya
+
+every user must see there badge in there clubs in my profile
