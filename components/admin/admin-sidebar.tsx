@@ -8,6 +8,7 @@ import {
   IconCalendarEvent,
   IconFileText,
   IconUsers,
+  IconUserStar,
   IconPhoto,
   IconArrowsLeftRight,
   IconExternalLink,
@@ -67,6 +68,9 @@ export function AdminSidebar({
   }
   // gallery visible to all tiers (editors manage content too)
   sections.push({ href: `${base}/gallery`, icon: IconPhoto, label: "Gallery" });
+
+  // Admins page: visible to everyone (read-only for non-lead). Lead can manage.
+  sections.push({ href: `${base}/admins`, icon: IconUserStar, label: "Admins" });
 
   function isActive(href: string) {
     if (href === base) return pathname === base;

@@ -85,6 +85,58 @@ export type Database = {
           },
         ]
       }
+      audit_log: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string
+          details: Json | null
+          id: string
+          target_club_id: string | null
+          target_profile_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string
+          details?: Json | null
+          id?: string
+          target_club_id?: string | null
+          target_profile_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string
+          details?: Json | null
+          id?: string
+          target_club_id?: string | null
+          target_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_log_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "audit_log_target_club_id_fkey"
+            columns: ["target_club_id"]
+            isOneToOne: false
+            referencedRelation: "clubs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "audit_log_target_profile_id_fkey"
+            columns: ["target_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categories: {
         Row: {
           color: string | null
@@ -558,13 +610,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_club_admin: {
+        Args: { club_id_in: string; profile_id_in: string; tier_in: string }
+        Returns: undefined
+      }
       can_edit_club_content: { Args: { target_club: string }; Returns: boolean }
       can_manage_admins: { Args: { target_club: string }; Returns: boolean }
       can_manage_applications: {
         Args: { target_club: string }
         Returns: boolean
       }
+      can_manage_club_admins: { Args: { club_id_in: string }; Returns: boolean }
       can_manage_gallery: { Args: { club_id_in: string }; Returns: boolean }
+      change_club_admin_tier: {
+        Args: { club_id_in: string; new_tier_in: string; profile_id_in: string }
+        Returns: undefined
+      }
       club_id_from_slug: { Args: { slug_in: string }; Returns: string }
       club_tier: { Args: { target_club: string }; Returns: string }
       current_recruitment_for_club: {
@@ -580,6 +641,10 @@ export type Database = {
       recruitment_phase: {
         Args: { recruitment_id_in: string }
         Returns: string
+      }
+      remove_club_admin: {
+        Args: { club_id_in: string; profile_id_in: string }
+        Returns: undefined
       }
       remove_member: {
         Args: { club_id_in: string; profile_id_in: string }
