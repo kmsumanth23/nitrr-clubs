@@ -96,3 +96,5 @@ rewrite and redirect for unautherized link access.
 admin should be able to create any type of event. ex shaurya
 
 every user must see there badge in there clubs in my profile
+
+when viewd on the galary photo on homepage it must show the details of the photo of what events it was from and club

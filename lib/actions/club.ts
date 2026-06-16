@@ -2,113 +2,167 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { clubEditSchema } from "@/lib/validation/club";
+import { z } from "zod";
 
 export type ClubEditResult = { error?: string; ok?: boolean };
 
-/**
- * Update club content. Writes deadline + result_date to the current
- * recruitment (only when not published); other fields go to clubs. Adds
- * community_whatsapp_link to the clubs row.
- */
-export async function updateClub(
+/** Update CONTENT-LEVEL club fields. No recruitment lifecycle state here. */
+const clubContentSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(2).max(120),
+  tagline: z.string().max(160).nullable().optional(),
+  category_id: z.string().uuid().nullable().optional(),
+  description: z.string().max(4000).nullable().optional(),
+  highlights: z.array(z.string()).max(8),
+  member_count: z.coerce.number().int().min(0).max(100000),
+  community_whatsapp_link: z.string().max(500).nullable().optional(),
+  instagram_url: z.string().max(500).nullable().optional(),
+  linkedin_url: z.string().max(500).nullable().optional(),
+});
+
+export async function updateClubContent(
   _prev: ClubEditResult,
   formData: FormData,
 ): Promise<ClubEditResult> {
-  const highlights: string[] = [];
-  for (const [key, value] of formData.entries()) {
-    if (key.startsWith("highlights__") && typeof value === "string" && value.trim()) {
-      highlights.push(value.trim());
-    }
-  }
+  // Highlights come in as multiple form entries
+  const highlights = formData
+    .getAll("highlights")
+    .map((v) => String(v).trim())
+    .filter((s) => s.length > 0)
+    .slice(0, 8);
 
-  const deadlineRaw = formData.get("recruitment_deadline") as string | null;
-  const deadlineIso =
-    deadlineRaw && deadlineRaw.length > 0 ? new Date(deadlineRaw).toISOString() : null;
-  const resultRaw = formData.get("result_date") as string | null;
-  const resultIso =
-    resultRaw && resultRaw.length > 0 ? new Date(resultRaw).toISOString() : null;
-
-  const parsed = clubEditSchema.safeParse({
+  const parsed = clubContentSchema.safeParse({
     id: formData.get("id"),
     name: formData.get("name"),
     tagline: nullable(formData.get("tagline")),
-    description: nullable(formData.get("description")),
     category_id: nullable(formData.get("category_id")),
+    description: nullable(formData.get("description")),
     highlights,
-    is_recruiting: formData.get("is_recruiting") === "on",
-    recruitment_deadline: deadlineIso,
-    result_date: resultIso,
-    member_count: formData.get("member_count"),
+    member_count: formData.get("member_count") ?? 0,
+    community_whatsapp_link: nullable(formData.get("community_whatsapp_link")),
     instagram_url: nullable(formData.get("instagram_url")),
     linkedin_url: nullable(formData.get("linkedin_url")),
-    community_whatsapp_link: nullable(formData.get("community_whatsapp_link")),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  if (parsed.data.recruitment_deadline && parsed.data.result_date) {
-    if (
-      new Date(parsed.data.result_date) < new Date(parsed.data.recruitment_deadline)
-    ) {
-      return { error: "Result date cannot be before the deadline." };
-    }
-  }
-
-  const { id, recruitment_deadline, result_date, ...clubPatch } = parsed.data;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: "Please sign in." };
+  if (!user) return { error: "Not signed in." };
 
-  // 1) Update the clubs row (includes community_whatsapp_link via clubPatch)
-  const { error: clubErr } = await supabase
+  const { id, ...rest } = parsed.data;
+  const { error: clubErr, data: clubData } = await supabase
     .from("clubs")
-    .update({ ...clubPatch, updated_by: user.id })
-    .eq("id", id);
+    .update({
+      ...rest,
+      tagline: rest.tagline ?? null,
+      category_id: rest.category_id ?? null,
+      description: rest.description ?? null,
+      community_whatsapp_link: rest.community_whatsapp_link ?? null,
+      instagram_url: rest.instagram_url ?? null,
+      linkedin_url: rest.linkedin_url ?? null,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("slug")
+    .single();
   if (clubErr) return { error: clubErr.message };
 
-  // 2) Update the current recruitment row with deadline/result_date, but
-  //    only if it's not already published (published recruitments are locked
-  //    and a new one must be created via Start New Recruitment).
-  const { data: currentRec } = await supabase
+  if (clubData?.slug) {
+    revalidatePath(`/clubs/${clubData.slug}`);
+    revalidatePath(`/admin/clubs/${clubData.slug}`);
+  }
+  revalidatePath("/clubs");
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/** Update RECRUITMENT LIFECYCLE state. Touches the most-recent
+ *  recruitments row + clubs.is_recruiting. Refuses if the current
+ *  recruitment is already published (start a new one instead). */
+const recruitmentUpdateSchema = z.object({
+  clubId: z.string().uuid(),
+  is_recruiting: z.coerce.boolean(),
+  recruitment_deadline: z.string().nullable().optional(),
+  result_date: z.string().nullable().optional(),
+});
+
+export async function updateRecruitment(
+  _prev: ClubEditResult,
+  formData: FormData,
+): Promise<ClubEditResult> {
+  const parsed = recruitmentUpdateSchema.safeParse({
+    clubId: formData.get("clubId"),
+    is_recruiting:
+      formData.get("is_recruiting") === "true" ||
+      formData.get("is_recruiting") === "on",
+    recruitment_deadline: nullable(formData.get("recruitment_deadline")),
+    result_date: nullable(formData.get("result_date")),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+
+  // is_recruiting on clubs
+  const { error: clubErr, data: clubData } = await supabase
+    .from("clubs")
+    .update({
+      is_recruiting: parsed.data.is_recruiting,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.data.clubId)
+    .select("slug")
+    .single();
+  if (clubErr) return { error: clubErr.message };
+
+  // Find current (most-recent) recruitment, if any
+  const { data: recRow } = await supabase
     .from("recruitments")
     .select("id, results_published_at")
-    .eq("club_id", id)
+    .eq("club_id", parsed.data.clubId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (currentRec) {
-    if (!currentRec.results_published_at) {
-      const { error: recErr } = await supabase
-        .from("recruitments")
-        .update({
-          deadline: recruitment_deadline ?? null,
-          result_date: result_date ?? null,
-        })
-        .eq("id", currentRec.id);
-      if (recErr) return { error: recErr.message };
-    }
-    // If the current recruitment is published, ignore the date fields here.
-    // The form disables them visually in that state.
-  } else if (recruitment_deadline || result_date) {
-    const { error: insErr } = await supabase.from("recruitments").insert({
-      club_id: id,
-      name: "Initial recruitment",
-      deadline: recruitment_deadline ?? null,
-      result_date: result_date ?? null,
-      created_by: user.id,
-    });
-    if (insErr) return { error: insErr.message };
+  if (recRow && !recRow.results_published_at) {
+    const deadlineIso = parsed.data.recruitment_deadline
+      ? new Date(parsed.data.recruitment_deadline).toISOString()
+      : null;
+    const resultIso = parsed.data.result_date
+      ? new Date(parsed.data.result_date).toISOString()
+      : null;
+    const { error: recErr } = await supabase
+      .from("recruitments")
+      .update({
+        deadline: deadlineIso,
+        result_date: resultIso,
+      })
+      .eq("id", recRow.id);
+    if (recErr) return { error: recErr.message };
   }
+  // If no recruitment exists, deadline/result fields silently no-op — the
+  // page UI hides them in that state so this branch shouldn't fire.
 
-  revalidatePath("/");
+  if (clubData?.slug) {
+    revalidatePath(`/clubs/${clubData.slug}`);
+    revalidatePath(`/admin/clubs/${clubData.slug}/recruitment`);
+    revalidatePath(`/admin/clubs/${clubData.slug}`);
+  }
   revalidatePath("/clubs");
-  revalidatePath(`/clubs/${parsed.data.name.toLowerCase().replace(/\s+/g, "-")}`);
-  revalidatePath("/profile");
+  revalidatePath("/");
   return { ok: true };
 }
+
+/** Back-compat shim: existing code that still imports `updateClub` calls
+ *  the new content action. Drop this once consumers migrate. */
+export const updateClub = updateClubContent;
 
 function nullable(v: FormDataEntryValue | null): string | null {
   const s = (v ?? "") as string;

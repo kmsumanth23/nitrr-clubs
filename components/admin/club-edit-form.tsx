@@ -3,34 +3,26 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import { updateClub, type ClubEditResult } from "@/lib/actions/club";
+import { updateClubContent, type ClubEditResult } from "@/lib/actions/club";
 import { HighlightsInput } from "@/components/admin/highlights-input";
-import { StartNewRecruitmentButton } from "@/components/admin/start-new-recruitment-button";
+import { DecommissionButton } from "@/components/admin/decommission-button";
 import { Modal } from "@/components/ui/modal";
 import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import type { Club, Category, AdminTier } from "@/lib/database.types";
-
-interface RecruitmentForForm {
-  id: string;
-  name: string | null;
-  deadline: string | null;
-  result_date: string | null;
-  results_published_at: string | null;
-}
 
 export function ClubEditForm({
   club,
   categories,
   tier,
-  currentRecruitment,
+  viewerIsSuper,
 }: {
   club: Club & { category: Category | null };
   categories: Category[];
   tier: AdminTier;
-  currentRecruitment: RecruitmentForForm | null;
+  viewerIsSuper: boolean;
 }) {
   const [state, formAction] = useActionState<ClubEditResult, FormData>(
-    updateClub,
+    updateClubContent,
     {},
   );
 
@@ -59,39 +51,19 @@ export function ClubEditForm({
     formRef.current?.requestSubmit();
   }
 
-  const deadlineDefault = currentRecruitment?.deadline
-    ? toLocalInputValue(currentRecruitment.deadline)
-    : "";
-  const resultDefault = currentRecruitment?.result_date
-    ? toLocalInputValue(currentRecruitment.result_date)
-    : "";
-  const published = !!currentRecruitment?.results_published_at;
-  const noRecruitment = !currentRecruitment;
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const communityLink = (club as any).community_whatsapp_link ?? "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const archivedAt = (club as any).archived_at as string | null | undefined;
 
   return (
     <>
-      {/* Recruitment status + "Start new recruitment" — OUTSIDE the form.
-          The button opens a modal with its own <form>, and HTML disallows
-          nested forms. Keeping this above the editable form sidesteps that. */}
-      {(published || noRecruitment) && (
-        <div className="mb-6 flex items-start justify-between gap-3 rounded-2xl border border-line bg-white p-4">
-          <p className="flex-1 text-xs text-ink-soft">
-            {published ? (
-              <>
-                Results were published on{" "}
-                <span className="font-medium text-ink">
-                  {new Date(currentRecruitment!.results_published_at!).toLocaleString("en-IN")}
-                </span>
-                . Start a new recruitment to begin a fresh cycle.
-              </>
-            ) : (
-              "No recruitment opened yet. Start one to begin accepting applications."
-            )}
-          </p>
-          <StartNewRecruitmentButton clubId={club.id} clubSlug={club.slug} />
+      {archivedAt && (
+        <div className="mb-6 rounded-2xl border border-clay bg-clay-soft p-4 text-sm text-clay">
+          <strong>This club is decommissioned</strong> (
+          {new Date(archivedAt).toLocaleDateString("en-IN")}). It&apos;s hidden
+          from the public site. Restore from Sysadmin → Archived to make it
+          live again.
         </div>
       )}
 
@@ -144,52 +116,17 @@ export function ClubEditForm({
         </div>
 
         <div className="rounded-2xl border border-line bg-white p-5">
-          <h3 className="mb-4 text-sm font-bold text-ink">Current recruitment</h3>
-          <label className="mb-3 flex items-center gap-2 text-sm text-ink">
-            <input
-              type="checkbox"
-              name="is_recruiting"
-              defaultChecked={club.is_recruiting}
-              className="h-4 w-4 rounded border-line accent-indigo"
-            />
-            Show as recruiting on public pages
-          </label>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-ink">Application deadline</label>
-              <input
-                type="datetime-local"
-                name="recruitment_deadline"
-                defaultValue={deadlineDefault}
-                disabled={published}
-                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:opacity-50"
-              />
-              <p className="mt-1.5 text-[11px] text-ink-soft">
-                {published
-                  ? "Locked — results are published for the current recruitment."
-                  : "Students can apply, edit, and withdraw until this time."}
-              </p>
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-ink">Result date (target)</label>
-              <input
-                type="datetime-local"
-                name="result_date"
-                defaultValue={resultDefault}
-                disabled={published}
-                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:opacity-50"
-              />
-              <p className="mt-1.5 text-[11px] text-ink-soft">Promised date for results.</p>
-            </div>
-          </div>
-          <div className="mt-4">
-            <Field
-              label="Member count"
-              name="member_count"
-              type="number"
-              defaultValue={String(club.member_count ?? 0)}
-            />
-          </div>
+          <h3 className="mb-4 text-sm font-bold text-ink">Member count</h3>
+          <Field
+            label="Total members"
+            name="member_count"
+            type="number"
+            defaultValue={String(club.member_count ?? 0)}
+          />
+          <p className="mt-1.5 text-[11px] text-ink-soft">
+            Manual override of the displayed count on the public page. The
+            actual roster lives on the Members page.
+          </p>
         </div>
 
         <div className="rounded-2xl border border-line bg-white p-5">
@@ -202,7 +139,7 @@ export function ClubEditForm({
           />
           <p className="mt-1.5 text-[11px] text-ink-soft">
             The permanent club group. Revealed to accepted members on their
-            profile after publish. (Reveal UX lands in step 11.)
+            profile after publish. (Reveal UX lands in step 16.)
           </p>
         </div>
 
@@ -234,6 +171,17 @@ export function ClubEditForm({
           </div>
         </div>
       </form>
+
+      {viewerIsSuper && !archivedAt && (
+        <div className="mt-8 rounded-2xl border border-clay-soft bg-clay-soft/30 p-5">
+          <h3 className="mb-2 text-sm font-bold text-clay">Danger zone</h3>
+          <p className="mb-4 text-xs text-ink-soft">
+            Sysadmin-only. Decommission hides this club from the public site
+            while preserving all its data. Restore anytime from Sysadmin → Archived.
+          </p>
+          <DecommissionButton clubId={club.id} clubName={club.name} />
+        </div>
+      )}
 
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)}>
         <div className="space-y-4">
@@ -297,10 +245,4 @@ function Field({
       />
     </div>
   );
-}
-
-function toLocalInputValue(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

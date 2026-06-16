@@ -10,6 +10,7 @@ import {
   IconUsers,
   IconUserStar,
   IconPhoto,
+  IconSpeakerphone,
   IconArrowsLeftRight,
   IconExternalLink,
   IconArrowLeft,
@@ -53,8 +54,14 @@ export function AdminSidebar({
     { href: base, icon: IconPencil, label: "Edit" },
     { href: `${base}/events`, icon: IconCalendarEvent, label: "Events" },
   ];
-  // applications + members hidden from editors
+
+  // Recruitment + applications + members hidden from editors
   if (myTier !== "editor") {
+    sections.push({
+      href: `${base}/recruitment`,
+      icon: IconSpeakerphone,
+      label: "Recruitment",
+    });
     sections.push({
       href: `${base}/applications`,
       icon: IconFileText,
@@ -66,10 +73,7 @@ export function AdminSidebar({
       label: "Members",
     });
   }
-  // gallery visible to all tiers (editors manage content too)
   sections.push({ href: `${base}/gallery`, icon: IconPhoto, label: "Gallery" });
-
-  // Admins page: visible to everyone (read-only for non-lead). Lead can manage.
   sections.push({ href: `${base}/admins`, icon: IconUserStar, label: "Admins" });
 
   function isActive(href: string) {

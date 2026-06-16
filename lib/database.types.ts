@@ -285,6 +285,7 @@ export type Database = {
       }
       clubs: {
         Row: {
+          archived_at: string | null
           category_id: string | null
           community_whatsapp_link: string | null
           cover_url: string | null
@@ -304,6 +305,7 @@ export type Database = {
           updated_by: string | null
         }
         Insert: {
+          archived_at?: string | null
           category_id?: string | null
           community_whatsapp_link?: string | null
           cover_url?: string | null
@@ -323,6 +325,7 @@ export type Database = {
           updated_by?: string | null
         }
         Update: {
+          archived_at?: string | null
           category_id?: string | null
           community_whatsapp_link?: string | null
           cover_url?: string | null
@@ -628,10 +631,21 @@ export type Database = {
       }
       club_id_from_slug: { Args: { slug_in: string }; Returns: string }
       club_tier: { Args: { target_club: string }; Returns: string }
+      count_clubs_without_admins: { Args: never; Returns: number }
+      create_club: {
+        Args: {
+          category_id_in: string
+          initial_lead_profile_id_in: string
+          name_in: string
+          slug_in: string
+        }
+        Returns: string
+      }
       current_recruitment_for_club: {
         Args: { club_id_in: string }
         Returns: string
       }
+      decommission_club: { Args: { club_id_in: string }; Returns: undefined }
       is_club_admin: { Args: { target_club: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
       publish_recruitment_results: {
@@ -642,12 +656,29 @@ export type Database = {
         Args: { recruitment_id_in: string }
         Returns: string
       }
+      recruitments_overdue: {
+        Args: never
+        Returns: {
+          club_id: string
+          club_name: string
+          club_slug: string
+          days_overdue: number
+          recruitment_id: string
+          recruitment_name: string
+          result_date: string
+        }[]
+      }
       remove_club_admin: {
         Args: { club_id_in: string; profile_id_in: string }
         Returns: undefined
       }
       remove_member: {
         Args: { club_id_in: string; profile_id_in: string }
+        Returns: undefined
+      }
+      restore_club: { Args: { club_id_in: string }; Returns: undefined }
+      set_super_admin: {
+        Args: { profile_id_in: string; value_in: boolean }
         Returns: undefined
       }
       start_new_recruitment: {

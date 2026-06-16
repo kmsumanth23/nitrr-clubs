@@ -1,114 +1,156 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
-  IconPencil,
+  IconExternalLink,
   IconCalendarEvent,
   IconFileText,
+  IconUsers,
+  IconUserStar,
   IconPhoto,
+  IconCircleDot,
+  IconSettings,
 } from "@tabler/icons-react";
+import { createClient } from "@/lib/supabase/server";
 import { getMyAdminClubs } from "@/lib/queries/admin";
-import { deadlineLabel } from "@/lib/deadline";
-import type { AdminTier } from "@/lib/database.types";
+import { isSysadmin } from "@/lib/queries/sysadmin";
 
 export const metadata = { title: "Admin — NITRR Clubs" };
+export const dynamic = "force-dynamic";
 
-const TIER_STYLES: Record<AdminTier, string> = {
-  lead: "bg-indigo text-indigo-fg",
-  manager: "bg-indigo-soft text-indigo",
-  editor: "bg-beige text-ink-soft",
-};
+export default async function AdminDashboardPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/?signin=1");
 
-export default async function AdminPage() {
-  const clubs = await getMyAdminClubs();
+  const [clubs, isSuper] = await Promise.all([
+    getMyAdminClubs(),
+    isSysadmin(),
+  ]);
 
   return (
-    <section>
-      <h1 className="text-3xl font-extrabold tracking-tight text-ink">
-        Admin dashboard
-      </h1>
-      <p className="mt-2 text-sm text-ink-soft">
-        Pick a club to manage. Use the chips on each card to jump straight to a
-        section.
-      </p>
-
-      <h2 className="mb-3 mt-10 text-lg font-bold text-ink">
-        Clubs you manage
-      </h2>
+    <section className="container mx-auto max-w-6xl px-4 py-10">
+      <div className="mb-8">
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink">
+          Admin dashboard
+        </h1>
+        <p className="mt-1 text-sm text-ink-soft">
+          Manage clubs you have access to.
+        </p>
+      </div>
 
       {clubs.length === 0 ? (
         <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
-          You aren&apos;t assigned to any club yet. A super-admin can add you in
-          the club_admins table.
+          You don&apos;t have admin access to any club yet. If you should,
+          contact a club lead or sysadmin.
         </p>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {clubs.map((c) => {
-            const base = `/admin/clubs/${c.slug}`;
-            const showApps = c.tier !== "editor";
-            return (
-              <li
-                key={c.id}
-                className="rounded-2xl border border-line bg-white p-5"
-              >
-                <Link href={base} className="block">
-                  <div className="mb-2 flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-ink hover:text-indigo">
-                        {c.name}
-                      </div>
-                      {c.category && (
-                        <div className="mt-0.5 text-xs text-ink-soft">
-                          {c.category.name}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      className={`flex-shrink-0 rounded-full px-2.5 py-1 text-[10px] font-medium capitalize ${TIER_STYLES[c.tier]}`}
-                    >
-                      {c.tier}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
-                    <span>{c.member_count ?? 0} members</span>
-                    <span>{c.upcoming_events} upcoming events</span>
-                    {c.pending_applications !== null && (
-                      <span>
-                        {c.pending_applications} pending application
-                        {c.pending_applications === 1 ? "" : "s"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-2 text-[11px] text-ink-soft">
-                    {deadlineLabel(c.current_recruitment?.deadline ?? null)} ·{" "}
-                    {c.is_recruiting ? "Recruiting" : "Not recruiting"}
-                  </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {clubs.map((c) => (
+            <div
+              key={c.id}
+              className="flex flex-col rounded-2xl border border-line bg-white p-4"
+            >
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <Link
+                  href={`/admin/clubs/${c.slug}`}
+                  className="flex-1 truncate text-sm font-semibold text-ink hover:text-indigo"
+                >
+                  {c.name}
                 </Link>
+                <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
+                  {c.tier}
+                </span>
+              </div>
 
-                {/* action chips */}
-                <div className="mt-4 flex flex-wrap gap-1.5 border-t border-line pt-3">
-                  <Chip href={base} icon={IconPencil} label="Edit" />
-                  <Chip
-                    href={`${base}/events`}
-                    icon={IconCalendarEvent}
-                    label="Events"
-                  />
-                  {showApps && (
+              <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-ink-soft">
+                {c.category?.name && (
+                  <span className="rounded-full bg-cream px-2 py-0.5">
+                    {c.category.name}
+                  </span>
+                )}
+                {c.is_recruiting && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sport-soft px-2 py-0.5 text-sport">
+                    <IconCircleDot size={9} /> Recruiting
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+                <Chip
+                  href={`/admin/clubs/${c.slug}`}
+                  icon={IconSettings}
+                  label="Edit"
+                />
+                <Chip
+                  href={`/admin/clubs/${c.slug}/events`}
+                  icon={IconCalendarEvent}
+                  label="Events"
+                  count={c.upcoming_events || undefined}
+                />
+                {c.tier !== "editor" && (
+                  <>
                     <Chip
-                      href={`${base}/applications`}
+                      href={`/admin/clubs/${c.slug}/applications`}
                       icon={IconFileText}
                       label="Applications"
+                      count={c.pending_applications ?? undefined}
                     />
-                  )}
-                  <Chip
-                    href={`${base}/gallery`}
-                    icon={IconPhoto}
-                    label="Gallery"
-                  />
+                    <Chip
+                      href={`/admin/clubs/${c.slug}/members`}
+                      icon={IconUsers}
+                      label="Members"
+                    />
+                  </>
+                )}
+                <Chip
+                  href={`/admin/clubs/${c.slug}/admins`}
+                  icon={IconUserStar}
+                  label="Admins"
+                />
+                <Chip
+                  href={`/admin/clubs/${c.slug}/gallery`}
+                  icon={IconPhoto}
+                  label="Gallery"
+                />
+                <Chip
+                  href={`/clubs/${c.slug}`}
+                  icon={IconExternalLink}
+                  label="View"
+                  external
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isSuper && (
+        <section className="mt-10">
+          <h2 className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-soft">
+            System
+          </h2>
+          <Link
+            href="/admin/sysadmin"
+            className="group flex items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4 hover:border-indigo/40 hover:bg-cream"
+          >
+            <div className="flex items-start gap-3">
+              <IconUserStar
+                size={20}
+                className="mt-0.5 text-ink-soft group-hover:text-indigo"
+              />
+              <div>
+                <div className="text-sm font-medium text-ink">Sysadmin dashboard</div>
+                <div className="mt-0.5 text-xs text-ink-soft">
+                  System-wide controls — create clubs, manage sysadmins,
+                  archive, audit log.
                 </div>
-              </li>
-            );
-          })}
-        </ul>
+              </div>
+            </div>
+            <span className="text-xs text-indigo">Open →</span>
+          </Link>
+        </section>
       )}
     </section>
   );
@@ -118,18 +160,35 @@ function Chip({
   href,
   icon: Icon,
   label,
+  count,
+  external,
 }: {
   href: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: typeof IconCalendarEvent;
   label: string;
+  count?: number;
+  external?: boolean;
 }) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-cream px-3 py-1 text-[11px] font-medium text-ink-soft hover:border-ink/30 hover:text-ink"
-    >
+  const cls =
+    "inline-flex items-center gap-1 rounded-full border border-line bg-white px-2.5 py-1 text-[11px] text-ink-soft hover:border-ink/30 hover:text-ink";
+  const content = (
+    <>
       <Icon size={12} />
       {label}
+      {count !== undefined && count > 0 && (
+        <span className="ml-1 rounded-full bg-indigo-soft px-1 text-indigo">
+          {count}
+        </span>
+      )}
+    </>
+  );
+  return external ? (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>
+      {content}
+    </a>
+  ) : (
+    <Link href={href} className={cls}>
+      {content}
     </Link>
   );
 }

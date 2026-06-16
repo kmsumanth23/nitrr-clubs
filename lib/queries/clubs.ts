@@ -17,17 +17,17 @@ export type ClubWithCategory = Club & {
   } | null;
 };
 
-/** All clubs + their category + current recruitment, for the listing page. */
+/** All ACTIVE (non-archived) clubs. */
 export async function getAllClubs(): Promise<ClubWithCategory[]> {
   const supabase = await createClient();
   const { data: clubs, error } = await supabase
     .from("clubs")
     .select("*, category:categories(*)")
+    .is("archived_at", null)
     .order("member_count", { ascending: false });
   if (error) throw error;
   if (!clubs || clubs.length === 0) return [];
 
-  // attach the latest recruitment per club in one query (avoid N+1)
   const ids = clubs.map((c) => c.id);
   const { data: recs } = await supabase
     .from("recruitments")
@@ -61,7 +61,6 @@ export async function getAllClubs(): Promise<ClubWithCategory[]> {
   })) as ClubWithCategory[];
 }
 
-/** All categories, for the filter pills. */
 export async function getCategories(): Promise<Category[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -78,7 +77,7 @@ export interface ClubDetail extends ClubWithCategory {
   gallery: GalleryPhoto[];
 }
 
-/** One club by slug + category + team + events + gallery + current recruitment. */
+/** One club by slug, only if not archived. */
 export async function getClubBySlug(slug: string): Promise<ClubDetail | null> {
   const supabase = await createClient();
 
@@ -86,6 +85,7 @@ export async function getClubBySlug(slug: string): Promise<ClubDetail | null> {
     .from("clubs")
     .select("*, category:categories(*)")
     .eq("slug", slug)
+    .is("archived_at", null)
     .maybeSingle();
   if (error) throw error;
   if (!club) return null;
@@ -135,11 +135,13 @@ export async function getClubBySlug(slug: string): Promise<ClubDetail | null> {
   };
 }
 
-/** All slugs — for generateStaticParams. Uses the build-time client because
- *  this runs at build (no HTTP request, so no cookies). */
+/** All slugs of ACTIVE clubs — for generateStaticParams. */
 export async function getAllClubSlugs(): Promise<string[]> {
   const supabase = createStaticClient();
-  const { data, error } = await supabase.from("clubs").select("slug");
+  const { data, error } = await supabase
+    .from("clubs")
+    .select("slug")
+    .is("archived_at", null);
   if (error) throw error;
-  return (data ?? []).map((c) => c.slug);
+  return (data ?? []).map((c: { slug: string }) => c.slug);
 }

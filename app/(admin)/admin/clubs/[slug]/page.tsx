@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { IconArrowLeft, IconExternalLink } from "@tabler/icons-react";
 import { getEditableClub, getCategoriesList } from "@/lib/queries/admin";
+import { isSysadmin } from "@/lib/queries/sysadmin";
 import { ClubEditForm } from "@/components/admin/club-edit-form";
 
 export const metadata = { title: "Edit club — Admin" };
@@ -13,13 +14,14 @@ export default async function AdminClubEditPage({
 }) {
   const { slug } = await params;
 
-  const [data, categories] = await Promise.all([
+  const [data, categories, isSuper] = await Promise.all([
     getEditableClub(slug),
     getCategoriesList(),
+    isSysadmin(),
   ]);
   if (!data) notFound();
 
-  const { club, category, tier, current_recruitment } = data;
+  const { club, category, tier } = data;
 
   return (
     <section>
@@ -59,7 +61,7 @@ export default async function AdminClubEditPage({
         club={{ ...club, category }}
         categories={categories}
         tier={tier}
-        currentRecruitment={current_recruitment}
+        viewerIsSuper={isSuper}
       />
     </section>
   );
