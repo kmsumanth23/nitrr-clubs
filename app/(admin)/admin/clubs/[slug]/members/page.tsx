@@ -3,8 +3,9 @@ import Link from "next/link";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { getEditableClub } from "@/lib/queries/admin";
 import { getMembersForClub } from "@/lib/queries/admin-members";
-import { MembersList } from "@/components/admin/members-list";
-import { createClient } from "@/lib/supabase/server";
+import { MemberRow } from "@/components/admin/member-row";
+import { ExportCsvButton } from "@/components/admin/export-csv-button";
+import { isSysadmin } from "@/lib/queries/sysadmin";
 
 export const metadata = { title: "Members — Admin" };
 
@@ -14,27 +15,15 @@ export default async function AdminMembersPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const data = await getEditableClub(slug);
+  const [data, isSuper] = await Promise.all([
+    getEditableClub(slug),
+    isSysadmin(),
+  ]);
   if (!data) notFound();
   const { club, tier } = data;
 
-  // editors can't manage members
+  // Members hidden from editor
   if (tier === "editor") redirect(`/admin/clubs/${slug}`);
-
-  // Determine if the current viewer is super_admin (for cross-lead removal)
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  let isSuper = false;
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
-    isSuper = profile?.role === "super_admin";
-  }
 
   const members = await getMembersForClub(club.id);
 
@@ -47,22 +36,41 @@ export default async function AdminMembersPage({
         <IconArrowLeft size={14} /> Edit {club.name}
       </Link>
 
-      <div className="mb-6">
-        <h1 className="text-3xl font-extrabold tracking-tight text-ink">
-          Members
-        </h1>
-        <p className="mt-1 text-sm text-ink-soft">
-          The club&apos;s current roster. Only the lead can remove members.
-        </p>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight text-ink">
+            Members
+          </h1>
+          <p className="mt-1 text-sm text-ink-soft">
+            {club.name}&apos;s roster. Accepted applicants land here when
+            results are published.
+          </p>
+        </div>
+        <ExportCsvButton
+          href={`/admin/api/export/club-roster?slug=${slug}`}
+          label="Export CSV"
+        />
       </div>
 
-      <MembersList
-        members={members}
-        clubId={club.id}
-        clubSlug={slug}
-        viewerTier={tier}
-        viewerIsSuper={isSuper}
-      />
+      {members.length === 0 ? (
+        <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
+          No members yet. Members appear here once a recruitment is published
+          with accepted applications.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {members.map((m) => (
+            <MemberRow
+              key={m.profile_id}
+              member={m}
+              clubId={club.id}
+              clubSlug={slug}
+              viewerTier={tier}
+              viewerIsSuper={isSuper}
+            />
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

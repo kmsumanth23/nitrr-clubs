@@ -5,6 +5,7 @@ import {
   IconPlus,
   IconArchive,
   IconHistory,
+  IconDownload,
   IconArrowRight,
 } from "@tabler/icons-react";
 import {
@@ -49,7 +50,13 @@ export default async function SysadminPage() {
       href: "/admin/sysadmin/audit",
       icon: IconHistory,
       label: "Audit log",
-      desc: "View admin actions across the system.",
+      desc: "Every admin action across the system.",
+    },
+    {
+      href: "/admin/sysadmin/export",
+      icon: IconDownload,
+      label: "Export",
+      desc: "Download CSV files of members and admins.",
     },
   ];
 

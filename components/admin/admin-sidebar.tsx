@@ -11,6 +11,7 @@ import {
   IconUserStar,
   IconPhoto,
   IconSpeakerphone,
+  IconHistory,
   IconArrowsLeftRight,
   IconExternalLink,
   IconArrowLeft,
@@ -55,7 +56,6 @@ export function AdminSidebar({
     { href: `${base}/events`, icon: IconCalendarEvent, label: "Events" },
   ];
 
-  // Recruitment + applications + members hidden from editors
   if (myTier !== "editor") {
     sections.push({
       href: `${base}/recruitment`,
@@ -75,6 +75,10 @@ export function AdminSidebar({
   }
   sections.push({ href: `${base}/gallery`, icon: IconPhoto, label: "Gallery" });
   sections.push({ href: `${base}/admins`, icon: IconUserStar, label: "Admins" });
+  // Audit log: lead+ and sysadmin only (editor doesn't see it)
+  if (myTier !== "editor") {
+    sections.push({ href: `${base}/audit`, icon: IconHistory, label: "Audit log" });
+  }
 
   function isActive(href: string) {
     if (href === base) return pathname === base;

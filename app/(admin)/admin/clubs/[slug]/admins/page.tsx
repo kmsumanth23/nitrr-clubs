@@ -5,6 +5,7 @@ import { getEditableClub } from "@/lib/queries/admin";
 import { getAdminsForClub } from "@/lib/queries/admin-admins";
 import { AdminsList } from "@/components/admin/admins-list";
 import { AddAdminModal } from "@/components/admin/add-admin-modal";
+import { ExportCsvButton } from "@/components/admin/export-csv-button";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Admins — Admin" };
@@ -21,7 +22,6 @@ export default async function AdminAdminsPage({
 
   const admins = await getAdminsForClub(club.id);
 
-  // Determine if viewer can manage admins: lead of this club OR sysadmin
   const supabase = await createClient();
   const {
     data: { user },
@@ -58,9 +58,16 @@ export default async function AdminAdminsPage({
             )}
           </p>
         </div>
-        {viewerCanManage && (
-          <AddAdminModal clubId={club.id} clubSlug={slug} />
-        )}
+        <div className="flex items-center gap-3">
+          <ExportCsvButton
+            href={`/admin/api/export/club-roster?slug=${slug}`}
+            label="Export CSV"
+            compact
+          />
+          {viewerCanManage && (
+            <AddAdminModal clubId={club.id} clubSlug={slug} />
+          )}
+        </div>
       </div>
 
       <AdminsList

@@ -142,9 +142,9 @@ audit_log (id PK, actor_id FK, action text, target_club_id FK,
 - `recruitment_phase(uuid) → 'open' | 'review' | 'result'`
 - `current_recruitment_for_club(uuid) → uuid`
 - `enforce_application_phase()` trigger — honors `app.bypass_phase_check = 'true'` GUC for legitimate admin operations
-- `publish_recruitment_results(uuid)` — lead-only, gated on zero pending/reviewing
+- `publish_recruitment_results(uuid)` — lead-only, gated on zero pending/reviewing; writes `publish_results` audit entry with `members_added` count (12c)
 - `start_new_recruitment(...)` — lead/manager
-- `remove_member(uuid, uuid)` — SECURITY DEFINER, lead/sysadmin only
+- `remove_member(uuid, uuid)` — SECURITY DEFINER, lead/sysadmin only; writes `remove_member` audit entry (12c)
 
 **Admin management (12a):**
 - `can_manage_club_admins(uuid)` — true for lead of that club OR sysadmin
@@ -169,13 +169,49 @@ audit_log (id PK, actor_id FK, action text, target_club_id FK,
 
 ### Audit log
 
-All admin-management actions (12a + 12b) write to `audit_log`. Viewer page lands in 12c. Querying directly:
+All admin-management actions (12a + 12b + 12c) write to `audit_log`. Append-only — no edits, no deletes, no UI to clear. RLS: sysadmin reads everything; lead/manager reads entries with `target_club_id` matching a club they admin.
+
+**Action → viewer category mapping** (see [lib/audit/categorize.ts](lib/audit/categorize.ts)):
+
+| Category pill | SQL `action` values |
+|---|---|
+| Club admins | `add_club_admin`, `remove_club_admin`, `change_club_admin_tier` |
+| Clubs | `create_club`, `decommission_club`, `restore_club` |
+| Super admins | `set_super_admin` |
+| Members | `publish_results`, `remove_member` |
+
+Club content edits (description, social links, member count) are intentionally NOT logged — too noisy, low value.
+
+**Viewer pages:**
+- `/admin/sysadmin/audit` — system-wide, with a per-club dropdown filter
+- `/admin/clubs/[slug]/audit` — scoped to one club, no club picker
+
+Both use cursor pagination on `created_at desc`, 50 rows/page. Prev simply resets to page 1 (no cursor stack — v1 simplification).
+
+Querying directly:
 
 ```sql
 select action, target_club_id, target_profile_id, details, created_at
 from audit_log
 order by created_at desc limit 50;
 ```
+
+### CSV exports (12c)
+
+Three GET route handlers under `/admin/api/export/`. All accept `?anonymize=1` to mask PII before download. Filename pattern: `{scope}_{YYYY-MM-DD}[_anonymized].csv`.
+
+| Route | Authority | Output |
+|---|---|---|
+| `club-roster?slug=X[&anonymize=1]` | Any admin of X OR sysadmin | One file combining admins + members of one club. `Type` column distinguishes; admins also carry their `Tier`. |
+| `all-members[?anonymize=1]` | Sysadmin only | All `club_members` system-wide with their clubs |
+| `all-admins[?anonymize=1]` | Sysadmin only | All `club_admins` system-wide with their clubs + tier |
+
+**Anonymization rules** (in [lib/csv/format.ts](lib/csv/format.ts)):
+- Email: first char + `***` + domain (`sumanth@nitrr.ac.in` → `s***@nitrr.ac.in`)
+- Roll number: first 4 chars + `***` (`21118270` → `2111***`)
+- Year, branch: kept (demographic, not PII)
+
+CSV escape follows RFC 4180 (`,`, `"`, `\n`, `\r` trigger quoting; internal `"` doubled). `\r\n` line endings for Excel/Sheets compatibility.
 
 ---
 
@@ -213,6 +249,7 @@ Status semantics:
 | `(student)` | `/profile` | SSR with auth gate |
 | `(admin)` | `/admin`, `/admin/clubs/[slug]/...` | SSR with auth + tier gate |
 | `(admin)` | `/admin/sysadmin/...` | SSR with sysadmin gate (12b) |
+| `(admin)` | `/admin/api/export/{club-roster,all-members,all-admins}` (12c) | GET route handlers; in-route authority check; returns `text/csv` with `Content-Disposition: attachment` |
 
 CSR islands inside SSR pages: filter pills, edit forms, modals, dashboards.
 
@@ -231,6 +268,7 @@ Auth gate pattern: route group's `layout.tsx` does session check → query hits 
 | `/admin/clubs/[slug]/members` | Manager + Lead + Sysadmin (view); Lead + Sysadmin (remove) | — |
 | `/admin/clubs/[slug]/admins` (12a) | Any admin tier (view); Lead + Sysadmin (manage) | — |
 | `/admin/clubs/[slug]/gallery` | Any admin tier | Same |
+| `/admin/clubs/[slug]/audit` (12c) | Manager + Lead + Sysadmin | — (read-only) |
 
 The Edit page handles content only (name, tagline, category, description, highlights, member_count, community link, socials, danger zone). Recruitment lifecycle (deadline, result_date, is_recruiting toggle, "Start new recruitment") lives on its own page. The two have separate save semantics: `updateClubContent` touches only `clubs`; `updateRecruitment` touches the current `recruitments` row + `clubs.is_recruiting`.
 
@@ -256,12 +294,12 @@ The Edit page handles content only (name, tagline, category, description, highli
 - **12a:** Per-club admin management UI (audit log table created, writes start here)
 - **12b:** Sysadmin landing + super_admin management + create club + decommission/restore
 - **12b-refinement:** Recruitment lifecycle moved out of Edit form into its own `/recruitment` page; `updateClub` split into `updateClubContent` + `updateRecruitment` for separate save scopes
+- **12c:** Audit log viewer (system-wide + per-club, cursor-paginated) + CSV exports (per-club roster, all-members, all-admins) with optional PII anonymization; `publish_recruitment_results` and `remove_member` now write audit entries
 
 ### Left
 
 | Step | Description |
 |---|---|
-| **12c** | Audit log viewer UI + CSV exports (per-club, all-members, all-admins) |
 | **13** | Deploy (Vercel + GH Actions CI) |
 | **14** | Content management + system polish (FAQ editor, category editor, activity feed, storage usage, bulk import, recompute counts) |
 | **15** | Notifications + comms (email via Resend, banner system, site config flags) |
@@ -337,6 +375,8 @@ UI: club has multiple positions per recruitment, each with year eligibility + cu
 14. **INSERT column/value counts must match.** Always count both lists before running. *(9f-2 start_new_recruitment off-by-one with created_by.)*
 
 15. **Don't name plpgsql variables after PG-reserved identifiers.** `current_role`, `current_user`, `session_user`, `current_schema` are SQL keywords that resolve to builtins inside expressions even when shadowed by a local variable. The function compiles fine; the bug only shows up at runtime, where comparisons silently use the builtin (e.g. `current_role` returns `'authenticated'`). Name target variables `target_role`, `actor_role`, etc. *(12b set_super_admin demote-always-fails bug.)*
+
+16. **A `.ts` file containing JSX errors as "Unterminated regexp literal."** The TS parser sees `<Foo>` and tries to interpret `<` as a generic / comparison / regex delimiter. The fix is renaming to `.tsx`, not editing the JSX. Imports are usually extensionless so the rename is transparent. *(12c lib/audit/format.tsx misnamed.)*
 
 ### File-shipping conventions
 - Flat output uses `__` as path separator (e.g. `marketing__page.tsx` = `app/(marketing)/page.tsx`)
