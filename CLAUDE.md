@@ -2,6 +2,8 @@
 
 The living source of truth for the NIT Raipur clubs & committees website rebuild. Update after every milestone.
 
+🚀 **Live at https://nitrr-clubs.vercel.app/** (since 2026-06-17)
+
 ---
 
 ## What we're building
@@ -9,7 +11,7 @@ The living source of truth for the NIT Raipur clubs & committees website rebuild
 A modern full-stack rebuild of the NIT Raipur clubs/committees website. Replaces an aging Create React App + Redux + static HTML project. Two purposes:
 
 1. **A real production site** for NITRR clubs — public landing, club pages, events, gallery, recruitment workflow.
-2. **A learning project** in parallel — HLD/LLD, SSR/CSR rendering strategies, RLS, migrations, CI/CD.
+2. **A learning project** in parallel — HLD/LLD, SSR/CSR rendering strategies, RLS, migrations, CI/CD, eventually containerization and orchestration.
 
 Visual language reference: communitie.in/hyderabad. Borrowed in spirit, not 1:1.
 
@@ -25,7 +27,7 @@ Visual language reference: communitie.in/hyderabad. Borrowed in spirit, not 1:1.
 - Supabase: Postgres + Auth + Storage
 - Postgres RLS for authority enforcement
 - React Hook Form + Zod for forms
-- Vercel hosting, GitHub Actions CI
+- Vercel hosting, GitHub Actions CI (PR-only)
 - ESLint + Prettier
 
 **Next 16 quirks worth knowing:**
@@ -34,7 +36,27 @@ Visual language reference: communitie.in/hyderabad. Borrowed in spirit, not 1:1.
 - `useFormState` is deprecated; use `useActionState` from React 19.
 - Turbopack default bundler; clear `.next` after migrations.
 
-**Auth:** Supabase Auth via Google OAuth + email/password. Sessions in HttpOnly cookies, not localStorage. **Multi-account testing requires separate incognito windows per account.**
+**Path aliases:** `tsconfig.json` aliases `@/lib/supabase/server` → `./lib/supabase/supabase__server.ts` so imports stay short despite the `__`-flat filename convention.
+
+**Auth:** Supabase Auth via email/password. (Google OAuth code path exists from step 6 but console setup deferred indefinitely; email-only is sufficient for NITRR institutional use.) Sessions in HttpOnly cookies, not localStorage. **Multi-account testing requires separate incognito windows per account.**
+
+---
+
+## Production
+
+- **URL:** https://nitrr-clubs.vercel.app/
+- **Hosting:** Vercel (free tier; auto-deploys from `main`)
+- **Database:** Supabase production project (single project; no staging)
+- **CI:** GitHub Actions on PRs (typecheck + lint + build)
+- **Monitoring:** Vercel built-in logs
+- **Branch protection:** off (single-dev project; revisit at handover time)
+- **DEPLOY.md** at repo root has the full deploy walkthrough + smoke test path
+
+Future learning track (not blocking real use):
+- Migrate to Mumbai/Singapore Supabase region for lower IN latency
+- Containerization + orchestration as DevOps learning exercise
+- Grafana for monitoring as enterprise practice
+- Multi-env (staging + prod separation) for the containerization story
 
 ---
 
@@ -86,7 +108,7 @@ Independent of admin tiers. Lead can exist without being a member. Member can ex
 
 ---
 
-## Database schema (current after 12b)
+## Database schema (current after 12c)
 
 ```
 profiles (id PK, email, full_name, role enum [student|admin|super_admin],
@@ -133,7 +155,6 @@ faqs (id PK, question, answer, is_published, sort_order)
 
 audit_log (id PK, actor_id FK, action text, target_club_id FK,
            target_profile_id FK, details jsonb, created_at)
-  -- append-only, written by admin SQL functions
 ```
 
 ### Key SQL functions
@@ -142,23 +163,21 @@ audit_log (id PK, actor_id FK, action text, target_club_id FK,
 - `recruitment_phase(uuid) → 'open' | 'review' | 'result'`
 - `current_recruitment_for_club(uuid) → uuid`
 - `enforce_application_phase()` trigger — honors `app.bypass_phase_check = 'true'` GUC for legitimate admin operations
-- `publish_recruitment_results(uuid)` — lead-only, gated on zero pending/reviewing; writes `publish_results` audit entry with `members_added` count (12c)
+- `publish_recruitment_results(uuid)` — lead-only, gated on zero pending/reviewing, **writes audit_log**
 - `start_new_recruitment(...)` — lead/manager
-- `remove_member(uuid, uuid)` — SECURITY DEFINER, lead/sysadmin only; writes `remove_member` audit entry (12c)
+- `remove_member(uuid, uuid)` — SECURITY DEFINER, lead/sysadmin only, **writes audit_log**
 
 **Admin management (12a):**
 - `can_manage_club_admins(uuid)` — true for lead of that club OR sysadmin
-- `add_club_admin(uuid, uuid, text)` — lead+/sysadmin
-- `remove_club_admin(uuid, uuid)` — lead+/sysadmin, blocked by last-lead protection
-- `change_club_admin_tier(uuid, uuid, text)` — lead+/sysadmin
+- `add_club_admin(uuid, uuid, text)` — lead+/sysadmin, writes audit_log
+- `remove_club_admin(uuid, uuid)` — lead+/sysadmin, blocked by last-lead protection, writes audit_log
+- `change_club_admin_tier(uuid, uuid, text)` — lead+/sysadmin, writes audit_log
 
 **Sysadmin (12b):**
 - `set_super_admin(uuid, boolean)` — sysadmin only, can't demote self if last
 - `create_club(text, text, uuid, uuid)` — sysadmin only, atomic with initial lead
-- `decommission_club(uuid)` — sysadmin only, sets archived_at
-- `restore_club(uuid)` — sysadmin only, clears archived_at
-- `count_clubs_without_admins() → int` — anomaly helper
-- `recruitments_overdue() → table(...)` — anomaly helper
+- `decommission_club(uuid)` / `restore_club(uuid)` — sysadmin only
+- `count_clubs_without_admins() → int` / `recruitments_overdue() → table(...)` — anomaly helpers
 
 **Gallery:**
 - `can_manage_gallery(uuid)` — any club admin tier
@@ -169,7 +188,7 @@ audit_log (id PK, actor_id FK, action text, target_club_id FK,
 
 ### Audit log
 
-All admin-management actions (12a + 12b + 12c) write to `audit_log`. Append-only — no edits, no deletes, no UI to clear. RLS: sysadmin reads everything; lead/manager reads entries with `target_club_id` matching a club they admin.
+Append-only — no edits, no deletes, no UI to clear. RLS: sysadmin reads everything; lead/manager reads entries with `target_club_id` matching a club they admin.
 
 **Action → viewer category mapping** (see [lib/audit/categorize.ts](lib/audit/categorize.ts)):
 
@@ -224,18 +243,12 @@ CSV escape follows RFC 4180 (`,`, `"`, `\n`, `\r` trigger quoting; internal `"` 
    • student CRUD              • admin decides            • locked
    • no decisions              • student locked           • members materialized
                                • interview WhatsApp        from accepteds
-                                 reveals (step 11)
+                                 reveals (step 16)
 ```
 
 Each "Start new recruitment" inserts a new `recruitments` row. Old rows stay as history. Students can re-apply in future recruitments (different row), not in the same one (unique constraint blocks).
 
-Status semantics:
-- `pending` / `reviewing` — submitted / being reviewed
-- `accepted` / `rejected` — admin decision (masked to student during review phase)
-- `withdrawn` — student withdrew during open phase
-- `removed` — was accepted/member, then removed via `remove_member`
-
-**Status masking during review phase** — student sees "Under review" regardless of admin's decision until publish. Enforced in `application-row.tsx` via `displayStatus` — data is correct, UI masks.
+Status semantics: pending / reviewing / accepted / rejected / withdrawn / removed. **Status masked from student during review phase** — they see "Under review" until publish. Enforced in `application-row.tsx` via `displayStatus`.
 
 ---
 
@@ -248,10 +261,8 @@ Status semantics:
 | `(auth)` | Sign-in modal + `/auth/callback` | client |
 | `(student)` | `/profile` | SSR with auth gate |
 | `(admin)` | `/admin`, `/admin/clubs/[slug]/...` | SSR with auth + tier gate |
-| `(admin)` | `/admin/sysadmin/...` | SSR with sysadmin gate (12b) |
-| `(admin)` | `/admin/api/export/{club-roster,all-members,all-admins}` (12c) | GET route handlers; in-route authority check; returns `text/csv` with `Content-Disposition: attachment` |
-
-CSR islands inside SSR pages: filter pills, edit forms, modals, dashboards.
+| `(admin)` | `/admin/sysadmin/...` | SSR with sysadmin gate |
+| `(admin)` | `/admin/api/export/*` | GET handlers (CSV downloads) |
 
 Auth gate pattern: route group's `layout.tsx` does session check → query hits RLS as second gate.
 
@@ -261,16 +272,18 @@ Auth gate pattern: route group's `layout.tsx` does session check → query hits 
 
 | Path | Who can view | Who can edit |
 |---|---|---|
-| `/admin/clubs/[slug]` (Edit content) | Any admin tier | Manager + Lead + Sysadmin |
-| `/admin/clubs/[slug]/events` | Any admin tier | Manager + Lead + Sysadmin |
-| `/admin/clubs/[slug]/recruitment` (12b-refinement) | Manager + Lead + Sysadmin | Same |
+| `/admin/clubs/[slug]` (Edit) | Any admin tier + sysadmin | Manager + Lead + Sysadmin |
+| `/admin/clubs/[slug]/events` | Any admin tier + sysadmin | Same |
+| `/admin/clubs/[slug]/recruitment` | Manager + Lead + Sysadmin | Same |
 | `/admin/clubs/[slug]/applications` | Manager + Lead + Sysadmin | Same |
 | `/admin/clubs/[slug]/members` | Manager + Lead + Sysadmin (view); Lead + Sysadmin (remove) | — |
-| `/admin/clubs/[slug]/admins` (12a) | Any admin tier (view); Lead + Sysadmin (manage) | — |
+| `/admin/clubs/[slug]/admins` | Any admin tier (view); Lead + Sysadmin (manage) | — |
 | `/admin/clubs/[slug]/gallery` | Any admin tier | Same |
-| `/admin/clubs/[slug]/audit` (12c) | Manager + Lead + Sysadmin | — (read-only) |
+| `/admin/clubs/[slug]/audit` | Manager + Lead + Sysadmin | — |
 
-The Edit page handles content only (name, tagline, category, description, highlights, member_count, community link, socials, danger zone). Recruitment lifecycle (deadline, result_date, is_recruiting toggle, "Start new recruitment") lives on its own page. The two have separate save semantics: `updateClubContent` touches only `clubs`; `updateRecruitment` touches the current `recruitments` row + `clubs.is_recruiting`.
+Sysadmin paths under `/admin/sysadmin/`: landing, super-admins, create-club, archived, audit, export.
+
+Recruitment lifecycle (deadline, result_date, is_recruiting toggle, "Start new recruitment") lives on its own page. The two have separate save semantics: `updateClubContent` touches only `clubs`; `updateRecruitment` touches the current `recruitments` row + `clubs.is_recruiting`.
 
 ---
 
@@ -295,18 +308,20 @@ The Edit page handles content only (name, tagline, category, description, highli
 - **12b:** Sysadmin landing + super_admin management + create club + decommission/restore
 - **12b-refinement:** Recruitment lifecycle moved out of Edit form into its own `/recruitment` page; `updateClub` split into `updateClubContent` + `updateRecruitment` for separate save scopes
 - **12c:** Audit log viewer (system-wide + per-club, cursor-paginated) + CSV exports (per-club roster, all-members, all-admins) with optional PII anonymization; `publish_recruitment_results` and `remove_member` now write audit entries
+- **13a:** Production prep — CI workflow, DEPLOY.md, preflight SQL, README, .env.example
+- **13b:** **Deployed to https://nitrr-clubs.vercel.app/** ✅
 
 ### Left
 
 | Step | Description |
 |---|---|
-| **13** | Deploy (Vercel + GH Actions CI) |
+| **Post-deploy Claude Code analysis** | a11y, perf, UX flows, code quality audit (uses prompt in `prompts/post-deploy-analysis-prompt.md`) |
 | **14** | Content management + system polish (FAQ editor, category editor, activity feed, storage usage, bulk import, recompute counts) |
 | **15** | Notifications + comms (email via Resend, banner system, site config flags) |
 | **16** | Year-restricted positions + per-position custom questions + WhatsApp link reveals |
 | **17** | Advanced data export (PDF, per-cycle reports, annual reports, JSON backup) |
 | **18** | Polish + extras (health checks, profile/user management for sysadmin, etc.) |
-| **19** | UI/UX pass (mobile redesigns, restore club-card style on /profile, accent color decision, badges) |
+| **19** | UI/UX pass (mobile redesigns, restore club-card style on /profile, accent color decision, badges, loading indicators) |
 
 Step 16 was originally numbered 11 — it's the year-restricted positions feature. Pushed back because it benefits from real-world user feedback first (deploy → users → step 16).
 
@@ -354,7 +369,7 @@ UI: club has multiple positions per recruitment, each with year eligibility + cu
 
 4. **Migrations need to disable downstream triggers during data moves.** Wrap data mutation in `alter table X disable trigger T` / `enable trigger T`. *(9f-1 migration crash.)*
 
-5. **When rewriting files after a migration, preserve export surfaces.** Surgical internal edits where columns moved, not full rewrites from scratch. *(9f-1 aftermath dropped getCategories, getAllClubSlugs, etc.)*
+5. **When rewriting files after a migration, preserve export surfaces.** Surgical internal edits where columns moved, not full rewrites from scratch. *(9f-1 aftermath dropped getCategories, getAllClubSlugs, etc.; 12c members-page reconstruction dropped prop signature.)*
 
 6. **`cookies()` cannot be used inside `generateStaticParams`** (Next 16 strict). Use `lib/supabase/static.ts` → `createStaticClient()`.
 
@@ -378,15 +393,19 @@ UI: club has multiple positions per recruitment, each with year eligibility + cu
 
 16. **A `.ts` file containing JSX errors as "Unterminated regexp literal."** The TS parser sees `<Foo>` and tries to interpret `<` as a generic / comparison / regex delimiter. The fix is renaming to `.tsx`, not editing the JSX. Imports are usually extensionless so the rename is transparent. *(12c lib/audit/format.tsx misnamed.)*
 
+17. **Next.js App Router route handler files are always named `route.ts`.** The directory tree expresses the URL; the file name expresses the verb. The `__` flat-naming convention applies to pages/layouts/middleware; route handlers must use literal `route.ts` in their final segment. Mis-named files become utility modules silently (the route doesn't exist; calls 404). *(12c — all three export routes shipped as `club-roster.ts` etc. and silently broke.)*
+
 ### File-shipping conventions
 - Flat output uses `__` as path separator (e.g. `marketing__page.tsx` = `app/(marketing)/page.tsx`)
 - Reserved Next names exact: `page.tsx`, `layout.tsx`, `route.tsx`, `proxy.ts`
+- **Route handler files always end with literal `route.ts`** — directory expresses URL, file expresses verb
+- **JSX always `.tsx`** — even helper modules that return React nodes
 - Helper/component files preserve real paths
 - Setup file always `SETUP_STEP<N>.md`
 
 ### Dev recipe
 - Clear `.next` after migrations
-- `tsc --noEmit` after batch file drops
+- `npm run typecheck` after batch file drops
 - `grep -rn "<dropped column>" lib/ components/ app/ --include="*.ts" --include="*.tsx"` after dropping any column
 - For admin queries: confirm `grep "^export" lib/queries/<file>.ts` matches consumer imports
 
@@ -427,11 +446,32 @@ from audit_log order by created_at desc limit 20;
 
 ---
 
+## Smoke test reference (post-9f, post-12, post-deploy)
+
+End-to-end recruitment cycle test (catches most regressions in ~5 min):
+
+1. As Gladiator: `/admin/clubs/shaurya` → Recruitment page shows phase + form. If last recruitment published, "Start new recruitment" button visible. Click → modal → set deadline ~2 min future, result_date ~5 min future.
+2. As Recruit (incognito 2): `/clubs/shaurya` → Apply enabled. Submit → `/profile` shows under Active with Pending.
+3. Wait for deadline. Refresh both.
+4. As Recruit: status now "Under review", view modal says locked.
+5. As Gladiator: `/admin/clubs/shaurya/applications` → phase banner says Review. Accept Recruit.
+6. As Recruit: refresh → still "Under review" (masked). My clubs empty.
+7. As Gladiator: publish panel → confirm → publish.
+8. As Recruit: refresh → status "Accepted" (now in History since published). Shaurya in My clubs.
+9. As Gladiator: `/admin/clubs/shaurya/members` → Recruit in roster. Click Remove → confirm.
+10. As Recruit: refresh → Shaurya gone. Old app shows "Removed" in History.
+11. Audit log check: `/admin/sysadmin/audit` → entries for accept + publish + remove visible.
+
+---
+
 ## Open small flags (not blocking, deferred)
 
+- **Site speed.** Pages feel slow due to: Supabase region (likely US-East; need IN-region for sub-100ms), N+1 queries on admin dashboard (3-5 queries per club listed), no edge caching for SSR routes. Loading indicators (Next.js `loading.tsx` segments) needed as immediate UX win.
+- **Modal post-action `useEffect` pattern triggers ~28 lint warnings** (`react-hooks/set-state-in-effect`). Pattern works correctly but isn't React Compiler-optimal. Refactor system-wide in a focused pass — move success handler into formAction `.then()` or migrate to `useEffectEvent`.
 - Super_admin shows generic "Lead" tag on clubs they don't formally admin — should show distinct "Super_admin" badge (cosmetic, UI/UX pass)
 - `useUser` hook can briefly flip to "not logged in" on transient network errors — should preserve previous state (defer to polish pass)
 - My clubs section on /profile renders as plain inline list — club-card aesthetic to be restored in UI/UX pass
 - Mobile-specific section redesigns deferred
 - Real photos, font polishing deferred
-- Google OAuth console setup pending (code path done since step 6)
+- Google OAuth console setup pending (code path done since step 6; not blocking for v1 — email-only auth is sufficient)
+- 16 seed clubs without admins (WARN from preflight) — leave as-is until NITRR onboarding assigns coordinators
