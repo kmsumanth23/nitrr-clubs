@@ -5,7 +5,6 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { ApplicationReviewRow } from "@/components/admin/application-review-row";
 import type {
   AdminApplication,
-  RecruitmentForAdmin,
   RecruitmentHistoryGroup,
 } from "@/lib/queries/admin-applications";
 import type { Phase } from "@/lib/phase";

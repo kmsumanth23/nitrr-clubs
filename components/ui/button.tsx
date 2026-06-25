@@ -50,6 +50,8 @@ export function Button(props: ButtonProps | LinkProps) {
     );
   }
 
+  // Strip non-HTML props so they aren't forwarded onto the <button> element.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { variant: _v, size: _s, className: _c, href: _h, ...rest } =
     props as ButtonProps;
   return (

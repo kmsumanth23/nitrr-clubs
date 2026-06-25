@@ -1,5 +1,4 @@
 import { createClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/database.types";
 
 export interface SysadminCounts {
   clubs_active: number;

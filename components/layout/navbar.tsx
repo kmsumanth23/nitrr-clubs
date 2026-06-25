@@ -184,12 +184,19 @@ export function Navbar() {
                       <IconLayoutDashboard size={16} /> Admin
                     </Link>
                   )}
-                  <a
-                    href="/auth/signout"
-                    className="flex items-center gap-2.5 border-t border-line px-4 py-2.5 text-sm text-clay hover:bg-cream"
+                  <form
+                    method="post"
+                    action="/auth/signout"
+                    className="border-t border-line"
                   >
-                    <IconLogout size={16} /> Sign out
-                  </a>
+                    <button
+                      type="submit"
+                      onClick={() => setMenuOpen(false)}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-clay hover:bg-cream"
+                    >
+                      <IconLogout size={16} /> Sign out
+                    </button>
+                  </form>
                 </div>
               )}
             </div>

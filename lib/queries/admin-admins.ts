@@ -34,7 +34,6 @@ export async function getAdminsForClub(
     .eq("club_id", clubId);
   if (error) throw error;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = (data ?? []) as Array<{
     profile_id: string;
     admin_role: AdminTier;
