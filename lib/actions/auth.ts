@@ -60,15 +60,6 @@ export async function signUp(
   redirect(`/profile/complete?next=${encodeURIComponent(next)}`);
 }
 
-/** Sign out the current user. Server Action — cookie deletes propagate
- *  through the redirect response automatically (Route Handler equivalents
- *  drop the Set-Cookie headers on NextResponse.redirect). */
-export async function signOut(): Promise<void> {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
-  redirect("/");
-}
-
 /** Begin Google OAuth — returns the URL to redirect the browser to. */
 export async function signInWithGoogle(formData: FormData): Promise<void> {
   const supabase = await createClient();

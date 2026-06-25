@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils";
 import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
 import { useUser } from "@/lib/hooks/use-user";
-import { signOut } from "@/lib/actions/auth";
 
 type NavItem = { label: string; type: "scroll" | "route"; target: string };
 
@@ -185,15 +184,12 @@ export function Navbar() {
                       <IconLayoutDashboard size={16} /> Admin
                     </Link>
                   )}
-                  <form action={signOut} className="border-t border-line">
-                    <button
-                      type="submit"
-                      onClick={() => setMenuOpen(false)}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-clay hover:bg-cream"
-                    >
-                      <IconLogout size={16} /> Sign out
-                    </button>
-                  </form>
+                  <a
+                    href="/auth/signout"
+                    className="flex items-center gap-2.5 border-t border-line px-4 py-2.5 text-sm text-clay hover:bg-cream"
+                  >
+                    <IconLogout size={16} /> Sign out
+                  </a>
                 </div>
               )}
             </div>

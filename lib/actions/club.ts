@@ -160,6 +160,10 @@ export async function updateRecruitment(
   return { ok: true };
 }
 
+/** Back-compat shim: existing code that still imports `updateClub` calls
+ *  the new content action. Drop this once consumers migrate. */
+export const updateClub = updateClubContent;
+
 function nullable(v: FormDataEntryValue | null): string | null {
   const s = (v ?? "") as string;
   return s.trim().length === 0 ? null : s;

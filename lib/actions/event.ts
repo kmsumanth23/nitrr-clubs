@@ -114,9 +114,7 @@ export async function updateEvent(
   if (!auth.ok) return { error: auth.error };
 
   const supabase = await createClient();
-  // Strip id from the update patch (id is the row selector, not a column to update).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { id: _id, ...patch } = parsed.data;
+  const { id: _ignore, ...patch } = parsed.data;
   const { error } = await supabase
     .from("events")
     .update({ ...patch, updated_by: auth.userId })

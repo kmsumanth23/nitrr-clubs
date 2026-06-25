@@ -24,36 +24,14 @@ export async function searchProfiles(
   query: string,
   excludeClubId?: string,
 ): Promise<ProfileSearchResult[]> {
-  // Strip characters that have meaning in PostgREST .or() filter syntax —
-  // commas, parens — so an attacker can't inject extra OR clauses like
-  // `,role.eq.super_admin`.
-  const sanitized = query.replace(/[,()]/g, " ").trim();
-  if (sanitized.length < 2) return [];
+  const q = query.trim();
+  if (q.length < 2) return [];
 
   const supabase = await createClient();
 
-  // Authority pre-check (don't rely on RLS alone). Only sysadmins and any
-  // tier of club admin may search the profiles table.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return [];
-  const [{ data: profile }, { data: adminRow }] = await Promise.all([
-    supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
-    supabase
-      .from("club_admins")
-      .select("admin_role")
-      .eq("profile_id", user.id)
-      .limit(1)
-      .maybeSingle(),
-  ]);
-  const isSuper = profile?.role === "super_admin";
-  const isAnyClubAdmin = !!adminRow;
-  if (!isSuper && !isAnyClubAdmin) return [];
-
   // Build a fuzzy filter: case-insensitive match on name, email, or roll
-  const like = `%${sanitized}%`;
-  const request = supabase
+  const like = `%${q}%`;
+  let request = supabase
     .from("profiles")
     .select("id, full_name, email, roll_number, year, branch")
     .or(

@@ -4,6 +4,7 @@ import * as React from "react";
 import { IconUpload, IconAlertCircle } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/client";
 import {
+  BUCKET,
   buildPath,
   publicUrl,
   uploadFile,
