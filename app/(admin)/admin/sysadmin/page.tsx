@@ -9,6 +9,8 @@ import {
   IconArrowRight,
   IconQuestionMark,
   IconTags,
+  IconDatabase,
+  IconStethoscope,
 } from "@tabler/icons-react";
 import {
   isSysadmin,
@@ -16,18 +18,22 @@ import {
   getClubsWithoutAdmins,
   getRecruitmentsOverdue,
 } from "@/lib/queries/sysadmin";
+import { getAuditLog } from "@/lib/queries/audit";
 import { SysadminAnomalies } from "@/components/admin/sysadmin-anomalies";
+import { ActivityFeedWidget } from "@/components/admin/activity-feed-widget";
 
 export const metadata = { title: "Sysadmin — Admin" };
 
 export default async function SysadminPage() {
   if (!(await isSysadmin())) redirect("/admin");
 
-  const [counts, clubsWithoutAdmins, recruitmentsOverdue] = await Promise.all([
-    getSysadminCounts(),
-    getClubsWithoutAdmins(),
-    getRecruitmentsOverdue(),
-  ]);
+  const [counts, clubsWithoutAdmins, recruitmentsOverdue, recentEntries] =
+    await Promise.all([
+      getSysadminCounts(),
+      getClubsWithoutAdmins(),
+      getRecruitmentsOverdue(),
+      getAuditLog({ limit: 7 }),
+    ]);
 
   const cards: {
     href: string;
@@ -77,6 +83,18 @@ export default async function SysadminPage() {
       label: "Categories",
       desc: "Manage club category tags and ordering.",
     },
+    {
+      href: "/admin/sysadmin/storage",
+      icon: IconDatabase,
+      label: "Storage",
+      desc: "Gallery photo usage per club; free tier meter.",
+    },
+    {
+      href: "/admin/sysadmin/diagnostics",
+      icon: IconStethoscope,
+      label: "Diagnostics",
+      desc: "Read-only health checks (member count drift, etc).",
+    },
   ];
 
   return (
@@ -100,6 +118,10 @@ export default async function SysadminPage() {
           <StatCard label="Members" value={counts.members} />
           <StatCard label="Events" value={counts.events} />
         </div>
+      </section>
+
+      <section className="mb-8">
+        <ActivityFeedWidget entries={recentEntries} />
       </section>
 
       <section className="mb-8">

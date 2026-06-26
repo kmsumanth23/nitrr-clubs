@@ -144,3 +144,5 @@ completes)*
 add notification on sigvnout 
 
 and profile search must show if searching already existing user.
+
+test direct access linkss if redirects are working or not

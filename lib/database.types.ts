@@ -650,6 +650,36 @@ export type Database = {
         Returns: string
       }
       decommission_club: { Args: { club_id_in: string }; Returns: undefined }
+      get_counter_drift: {
+        Args: never
+        Returns: {
+          actual_count: number
+          club_id: string
+          drift: number
+          manual_count: number
+          name: string
+          slug: string
+        }[]
+      }
+      get_largest_photos: {
+        Args: { limit_in?: number; threshold_bytes?: number }
+        Returns: {
+          bytes: number
+          club_name: string
+          club_slug: string
+          path: string
+          uploaded_at: string
+        }[]
+      }
+      get_storage_usage: {
+        Args: never
+        Returns: {
+          club_name: string
+          club_slug: string
+          file_count: number
+          total_bytes: number
+        }[]
+      }
       is_club_admin: { Args: { target_club: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
       publish_recruitment_results: {
