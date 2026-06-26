@@ -23,9 +23,22 @@ export function CategoryRow({
 }) {
   const router = useRouter();
   const [editing, setEditing] = React.useState(false);
+  const [editKey, setEditKey] = React.useState(0);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Stable callback + key bump — see faq-list.tsx for the rationale.
+  const handleEditingChange = React.useCallback(
+    (next: boolean) => {
+      setEditing(next);
+      if (!next) {
+        setEditKey((k) => k + 1);
+        router.refresh();
+      }
+    },
+    [router],
+  );
 
   async function onDelete() {
     setBusy(true);
@@ -129,11 +142,9 @@ export function CategoryRow({
       </li>
 
       <CategoryFormModal
+        key={editKey}
         open={editing}
-        onOpenChange={(next) => {
-          setEditing(next);
-          if (!next) router.refresh();
-        }}
+        onOpenChange={handleEditingChange}
         existing={{
           id: category.id,
           name: category.name,

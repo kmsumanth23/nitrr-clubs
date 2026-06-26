@@ -29,9 +29,22 @@ export function FaqRow({
 }) {
   const router = useRouter();
   const [editing, setEditing] = React.useState(false);
+  const [editKey, setEditKey] = React.useState(0);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Stable callback + key bump — see faq-list.tsx for the rationale.
+  const handleEditingChange = React.useCallback(
+    (next: boolean) => {
+      setEditing(next);
+      if (!next) {
+        setEditKey((k) => k + 1);
+        router.refresh();
+      }
+    },
+    [router],
+  );
 
   async function onToggle() {
     setBusy(true);
@@ -67,7 +80,6 @@ export function FaqRow({
   return (
     <>
       <li className="flex items-start gap-3 border-b border-line px-4 py-3 last:border-b-0">
-        {/* Reorder arrows */}
         <div className="flex flex-col gap-0.5 pt-1">
           <button
             type="button"
@@ -89,23 +101,18 @@ export function FaqRow({
           </button>
         </div>
 
-        {/* Position */}
         <div className="w-6 pt-1 text-[11px] tabular-nums text-ink-soft">
           {index + 1}
         </div>
 
-        {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-ink">{faq.question}</div>
           <div className="mt-1 line-clamp-2 text-xs text-ink-soft">
             {faq.answer}
           </div>
-          {error && (
-            <p className="mt-1 text-xs text-clay">{error}</p>
-          )}
+          {error && <p className="mt-1 text-xs text-clay">{error}</p>}
         </div>
 
-        {/* Published toggle */}
         <label className="flex flex-shrink-0 items-center gap-1.5 pt-1 text-[11px] text-ink-soft">
           <input
             type="checkbox"
@@ -117,7 +124,6 @@ export function FaqRow({
           Published
         </label>
 
-        {/* Actions */}
         <div className="flex flex-shrink-0 items-center gap-1 pt-1">
           <button
             type="button"
@@ -162,11 +168,9 @@ export function FaqRow({
       </li>
 
       <FaqFormModal
+        key={editKey}
         open={editing}
-        onOpenChange={(next) => {
-          setEditing(next);
-          if (!next) router.refresh();
-        }}
+        onOpenChange={handleEditingChange}
         existing={faq}
       />
     </>

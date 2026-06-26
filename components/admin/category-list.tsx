@@ -14,6 +14,20 @@ export function CategoryList({
 }) {
   const router = useRouter();
   const [adding, setAdding] = React.useState(false);
+  const [modalKey, setModalKey] = React.useState(0);
+
+  // Stable callback + key bump — prevents infinite loop in form modal's
+  // useEffect dep on onOpenChange. See faq-list.tsx for full rationale.
+  const handleAddingChange = React.useCallback(
+    (next: boolean) => {
+      setAdding(next);
+      if (!next) {
+        setModalKey((k) => k + 1);
+        router.refresh();
+      }
+    },
+    [router],
+  );
 
   const totalClubs = categories.reduce((s, c) => s + c.club_count, 0);
 
@@ -54,11 +68,9 @@ export function CategoryList({
       </div>
 
       <CategoryFormModal
+        key={modalKey}
         open={adding}
-        onOpenChange={(next) => {
-          setAdding(next);
-          if (!next) router.refresh();
-        }}
+        onOpenChange={handleAddingChange}
       />
     </>
   );

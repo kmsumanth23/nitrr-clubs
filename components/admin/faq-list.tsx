@@ -10,6 +10,23 @@ import type { Faq } from "@/lib/database.types";
 export function FaqList({ faqs }: { faqs: Faq[] }) {
   const router = useRouter();
   const [adding, setAdding] = React.useState(false);
+  // Bump key on close → modal re-mounts with fresh useActionState on next open
+  const [modalKey, setModalKey] = React.useState(0);
+
+  // Stable callback prevents an infinite-loop in the form modal's useEffect
+  // (which depends on this ref). Without useCallback every parent render
+  // creates a new function, the effect re-fires while state.ok is still true,
+  // → router.refresh() → re-render → new fn → re-fire → loop.
+  const handleAddingChange = React.useCallback(
+    (next: boolean) => {
+      setAdding(next);
+      if (!next) {
+        setModalKey((k) => k + 1);
+        router.refresh();
+      }
+    },
+    [router],
+  );
 
   return (
     <>
@@ -49,11 +66,9 @@ export function FaqList({ faqs }: { faqs: Faq[] }) {
       </div>
 
       <FaqFormModal
+        key={modalKey}
         open={adding}
-        onOpenChange={(next) => {
-          setAdding(next);
-          if (!next) router.refresh();
-        }}
+        onOpenChange={handleAddingChange}
       />
     </>
   );
