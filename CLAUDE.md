@@ -207,14 +207,6 @@ Club content edits (description, social links, member count) are intentionally N
 
 Both use cursor pagination on `created_at desc`, 50 rows/page. Prev simply resets to page 1 (no cursor stack — v1 simplification).
 
-Querying directly:
-
-```sql
-select action, target_club_id, target_profile_id, details, created_at
-from audit_log
-order by created_at desc limit 50;
-```
-
 ### CSV exports (12c)
 
 Three GET route handlers under `/admin/api/export/`. All accept `?anonymize=1` to mask PII before download. Filename pattern: `{scope}_{YYYY-MM-DD}[_anonymized].csv`.
@@ -310,20 +302,57 @@ Recruitment lifecycle (deadline, result_date, is_recruiting toggle, "Start new r
 - **12c:** Audit log viewer (system-wide + per-club, cursor-paginated) + CSV exports (per-club roster, all-members, all-admins) with optional PII anonymization; `publish_recruitment_results` and `remove_member` now write audit entries
 - **13a:** Production prep — CI workflow, DEPLOY.md, preflight SQL, README, .env.example
 - **13b:** **Deployed to https://nitrr-clubs.vercel.app/** ✅
+- **Post-deploy Claude Code analysis:** Comprehensive audit run; findings catalogued below in "Known issues from post-deploy audit." The fix attempt was reverted (see lesson 18); fixes will be applied carefully in future steps when each item naturally fits.
+- **Post-deploy cleanup (single change kept from revert):** `components/layout/faulty_navbar_admin_not_rendering.tsx` deleted (dead 215-line file, zero imports)
 
 ### Left
 
 | Step | Description |
 |---|---|
-| **Post-deploy Claude Code analysis** | a11y, perf, UX flows, code quality audit (uses prompt in `prompts/post-deploy-analysis-prompt.md`) |
-| **14** | Content management + system polish (FAQ editor, category editor, activity feed, storage usage, bulk import, recompute counts) |
+| **14** | Content management — FAQ editor, category editor, activity feed, storage usage report, recompute counters (scope to be discussed before shipping) |
 | **15** | Notifications + comms (email via Resend, banner system, site config flags) |
 | **16** | Year-restricted positions + per-position custom questions + WhatsApp link reveals |
 | **17** | Advanced data export (PDF, per-cycle reports, annual reports, JSON backup) |
-| **18** | Polish + extras (health checks, profile/user management for sysadmin, etc.) |
+| **18** | Polish + extras — most P0/P1 from post-deploy audit fold in here (security fixes, signup flow, etc.) |
 | **19** | UI/UX pass (mobile redesigns, restore club-card style on /profile, accent color decision, badges, loading indicators) |
 
 Step 16 was originally numbered 11 — it's the year-restricted positions feature. Pushed back because it benefits from real-world user feedback first (deploy → users → step 16).
+
+---
+
+## Known issues from post-deploy audit
+
+Findings from the comprehensive analysis pass (post-13b). Not blocking real use; will be addressed item-by-item in future steps when each one naturally fits a focused session, with proper in-session testing rather than autonomous batch fixes (see lesson 18).
+
+### Security (high priority — handle individually with care)
+- **Profile-search filter injection** (`lib/queries/profile-search.ts:33-42`) — User-supplied `q` is concatenated unsanitised into a PostgREST `.or()` filter. Typing `,role.eq.super_admin` injects extra OR conditions. RLS still applies so it's not privilege escalation, but admins could craft queries to leak fields. **Fix when:** addressing profile-search UX (any step that touches this code).
+- **`searchProfiles` action has no explicit authority pre-check** — Relies entirely on RLS for gating. Per lesson 1 ("RLS is a safety net, not a query filter"), needs an explicit auth check. **Fix when:** the filter injection fix happens (same file).
+- **`/auth/signout` is a GET handler that mutates** — Link prefetchers and previewers could silently sign users out. **Fix when:** safe to touch the navbar (probably step 19 UI/UX pass, since navbar form rewrite is touchier than it sounds).
+
+### Performance (perceived speed)
+- **N+1 query on admin dashboard** — `getMyAdminClubs` in `lib/queries/admin.ts:117-151` fires 2 queries per club. 18 clubs = 36+ round-trips. Replace with grouped `IN (...) group by club_id` queries. **Fix when:** any step that touches admin dashboard queries (likely step 14).
+- **No `loading.tsx` route segments** — Every navigation shows blank screen during SSR. Add skeletons for `/admin`, `/clubs/[slug]`, `/events/[slug]`, `/profile`. **Fix when:** step 19 UI/UX pass (skeleton design is part of the visual system).
+- **`window.location.reload()` in 12 components** — Hard-reloads after every admin mutation; should be `router.refresh()`. Touches all admin rows + modals. **Fix when:** step 18 polish (carefully, since the modal `useEffect` pattern is intertwined).
+- **Unbounded queries** on `getAllEvents` and `getAllGalleryPhotos` — Time bomb as content grows; not urgent now. Add `.limit(200)` + filter archived clubs' events. **Fix when:** step 14 if convenient, else step 18.
+
+### Accessibility (group as a single pass later)
+- Modal lacks focus trap, `aria-labelledby`, focus restore — migrate to Radix Dialog (already in stack via shadcn/ui)
+- Gallery lightbox has no Escape-to-close, no `role="dialog"`, no close button
+- Landing-page club cards: highlights only visible on hover (invisible on touch devices)
+- Form status messages have no `aria-live` region (screen-reader silent on save/error)
+- **Fix when:** dedicated a11y session, probably folded into step 19 UI/UX pass
+
+### UX dead-ends
+- **Post-signup flow broken** — Redirects to `/profile/complete` which requires session, but Supabase email-confirmation flow means user has no session yet. Hits `user!` non-null assertion. **Fix when:** before sharing site with new users (anywhere, but soon).
+- **No email-verification landing page** — Clicking verification link drops user on homepage with no confirmation. **Fix when:** with the signup flow fix above.
+- **"Publish results" panel shows with zero applications** — Confusing for leads on empty cycles. Two-line conditional fix. **Fix when:** anywhere convenient (step 14 if touching applications page).
+
+### Code quality (defer indefinitely or fold opportunistically)
+- 40 `any` casts on Supabase joins — root cause is Supabase JS join-syntax typing; not worth fixing
+- ~28 modal `useEffect` post-action lint warnings — Group E from lint analysis; needs system-wide refactor pass, deferred
+- `nullable()` helper duplicated in 3 files — 3 lines × 3, not worth a focused fix
+- Auth-check pattern repeated across server actions/routes — extract `canManageClub(clubId, tiers[])` helper when convenient; not urgent
+- Magic numbers scattered (page sizes, resize dimensions) — bikeshed, leave alone
 
 ---
 
@@ -394,6 +423,13 @@ UI: club has multiple positions per recruitment, each with year eligibility + cu
 16. **A `.ts` file containing JSX errors as "Unterminated regexp literal."** The TS parser sees `<Foo>` and tries to interpret `<` as a generic / comparison / regex delimiter. The fix is renaming to `.tsx`, not editing the JSX. Imports are usually extensionless so the rename is transparent. *(12c lib/audit/format.tsx misnamed.)*
 
 17. **Next.js App Router route handler files are always named `route.ts`.** The directory tree expresses the URL; the file name expresses the verb. The `__` flat-naming convention applies to pages/layouts/middleware; route handlers must use literal `route.ts` in their final segment. Mis-named files become utility modules silently (the route doesn't exist; calls 404). *(12c — all three export routes shipped as `club-roster.ts` etc. and silently broke.)*
+
+18. **Working production code beats theoretically-better code; auth-touching fixes need in-session iteration, not autonomous batches.** The post-deploy fix attempt bundled 3 auth-adjacent changes (profile-search sanitization, authority pre-check, signout GET→POST) plus dead code + lint cleanup into one autonomous Phase 1. Result: signout and profile-search both broke; full revert required. Auth flows have subtle failure modes that aren't visible in diff review — they need actual in-browser smoke tests after each individual change. **Rule:** when fixing working production code, do ONE change per session, smoke-test in browser, then move on. Batch fixes are fine for hygiene (lint, dead code, formatting); they don't work for behavior-changing code. The post-deploy audit findings are valuable as a known-issues catalog (see section above); apply fixes one at a time when each naturally fits a session.
+
+19. GRANTs and RLS are two layers — but the discipline is checking, not just remembering. Lesson 2 was already in the book when 14a shipped, but the migration forgot the grant select, insert, update, delete on faqs/categories to authenticated. RLS denial returns "row level security policy violation"; missing GRANT returns "permission denied for table X". The error wording differs, so triage by reading the message carefully. When adding a new admin write surface to a previously read-only table, always grant the role + add the RLS policy in the same migration. (14a faqs/categories write-permission denial.)
+
+
+20. Verify shared component APIs before consuming them in new code. The Modal component uses onClose: () => void, not the Radix-style onOpenChange: (next: boolean) => void. Writing new modal consumers based on what the API "should be" (e.g. what we'd migrate to in a planned refactor) causes build errors when the refactor hasn't happened. Before writing a new consumer, grep components/ui/<name>.tsx and check the actual props interface. (14a form modals shipped with onOpenChange + title props that didn't exist.)
 
 ### File-shipping conventions
 - Flat output uses `__` as path separator (e.g. `marketing__page.tsx` = `app/(marketing)/page.tsx`)
@@ -466,8 +502,8 @@ End-to-end recruitment cycle test (catches most regressions in ~5 min):
 
 ## Open small flags (not blocking, deferred)
 
-- **Site speed.** Pages feel slow due to: Supabase region (likely US-East; need IN-region for sub-100ms), N+1 queries on admin dashboard (3-5 queries per club listed), no edge caching for SSR routes. Loading indicators (Next.js `loading.tsx` segments) needed as immediate UX win.
-- **Modal post-action `useEffect` pattern triggers ~28 lint warnings** (`react-hooks/set-state-in-effect`). Pattern works correctly but isn't React Compiler-optimal. Refactor system-wide in a focused pass — move success handler into formAction `.then()` or migrate to `useEffectEvent`.
+- **Site speed.** See "Known issues from post-deploy audit" → Performance section. Loading indicators + N+1 fix are biggest wins; defer to step 18 + step 19 with careful per-item testing.
+- **Modal post-action `useEffect` pattern triggers ~28 lint warnings** (`react-hooks/set-state-in-effect`). Pattern works correctly but isn't React Compiler-optimal. System-wide refactor pass deferred (post-deploy fix attempt confirmed this needs its own focused session, not a folded-in cleanup).
 - Super_admin shows generic "Lead" tag on clubs they don't formally admin — should show distinct "Super_admin" badge (cosmetic, UI/UX pass)
 - `useUser` hook can briefly flip to "not logged in" on transient network errors — should preserve previous state (defer to polish pass)
 - My clubs section on /profile renders as plain inline list — club-card aesthetic to be restored in UI/UX pass

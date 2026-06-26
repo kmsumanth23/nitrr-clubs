@@ -1,4 +1,4 @@
- export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -631,6 +631,10 @@ export type Database = {
       }
       club_id_from_slug: { Args: { slug_in: string }; Returns: string }
       club_tier: { Args: { target_club: string }; Returns: string }
+      count_clubs_in_category: {
+        Args: { category_id_in: string }
+        Returns: number
+      }
       count_clubs_without_admins: { Args: never; Returns: number }
       create_club: {
         Args: {
@@ -691,6 +695,14 @@ export type Database = {
           result_date_in: string
         }
         Returns: string
+      }
+      swap_category_order: {
+        Args: { id_a: string; id_b: string }
+        Returns: undefined
+      }
+      swap_faq_order: {
+        Args: { id_a: string; id_b: string }
+        Returns: undefined
       }
     }
     Enums: {

@@ -140,3 +140,7 @@ completes)*
 - admin should be able to create any type of event. ex shaurya  *(✓ done — admin events CRUD in 9c)*
 - every user must see there badge in there clubs in my profile  *(future — show "Lead/Manager/Editor/Member" badge per club on /profile; UI/UX pass)*
 - when viewd on the galary photo on homepage it must show the details of the photo of what events it was from and club  *(future — lightbox/modal on homepage gallery with metadata; UI/UX pass + needs photo→event linking which currently isn't enforced since gallery is standalone per Model A from step 9e)*
+
+add notification on sigvnout 
+
+and profile search must show if searching already existing user.

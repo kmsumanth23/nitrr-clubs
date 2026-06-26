@@ -7,6 +7,8 @@ import {
   IconHistory,
   IconDownload,
   IconArrowRight,
+  IconQuestionMark,
+  IconTags,
 } from "@tabler/icons-react";
 import {
   isSysadmin,
@@ -27,7 +29,12 @@ export default async function SysadminPage() {
     getRecruitmentsOverdue(),
   ]);
 
-  const cards: { href: string; icon: typeof IconUserStar; label: string; desc: string }[] = [
+  const cards: {
+    href: string;
+    icon: typeof IconUserStar;
+    label: string;
+    desc: string;
+  }[] = [
     {
       href: "/admin/sysadmin/super-admins",
       icon: IconUserStar,
@@ -57,6 +64,18 @@ export default async function SysadminPage() {
       icon: IconDownload,
       label: "Export",
       desc: "Download CSV files of members and admins.",
+    },
+    {
+      href: "/admin/sysadmin/faqs",
+      icon: IconQuestionMark,
+      label: "FAQs",
+      desc: "Manage the homepage and /faq accordion.",
+    },
+    {
+      href: "/admin/sysadmin/categories",
+      icon: IconTags,
+      label: "Categories",
+      desc: "Manage club category tags and ordering.",
     },
   ];
 
@@ -105,13 +124,19 @@ export default async function SysadminPage() {
               className="group flex items-start justify-between gap-3 rounded-2xl border border-line bg-white p-4 hover:border-indigo/40 hover:bg-cream"
             >
               <div className="flex items-start gap-3">
-                <c.icon size={20} className="mt-0.5 text-ink-soft group-hover:text-indigo" />
+                <c.icon
+                  size={20}
+                  className="mt-0.5 text-ink-soft group-hover:text-indigo"
+                />
                 <div>
                   <div className="text-sm font-medium text-ink">{c.label}</div>
                   <div className="mt-0.5 text-xs text-ink-soft">{c.desc}</div>
                 </div>
               </div>
-              <IconArrowRight size={16} className="mt-0.5 text-ink-soft group-hover:text-indigo" />
+              <IconArrowRight
+                size={16}
+                className="mt-0.5 text-ink-soft group-hover:text-indigo"
+              />
             </Link>
           ))}
         </div>
