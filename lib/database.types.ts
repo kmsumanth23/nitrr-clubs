@@ -650,6 +650,10 @@ export type Database = {
         Returns: string
       }
       decommission_club: { Args: { club_id_in: string }; Returns: undefined }
+      delete_archived_club: {
+        Args: { club_id_in: string; slug_confirm: string }
+        Returns: undefined
+      }
       get_counter_drift: {
         Args: never
         Returns: {
@@ -686,6 +690,8 @@ export type Database = {
         Args: { recruitment_id_in: string }
         Returns: undefined
       }
+      recompute_all_member_counts: { Args: never; Returns: number }
+      recompute_member_count: { Args: { club_id_in: string }; Returns: number }
       recruitment_phase: {
         Args: { recruitment_id_in: string }
         Returns: string

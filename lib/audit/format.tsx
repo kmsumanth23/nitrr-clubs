@@ -89,6 +89,21 @@ export function formatAuditEntry(entry: AuditEntry): {
         ),
       };
 
+    case "permanent_delete_club": {
+      const slug = (details.club_slug as string) ?? "";
+      const name = (details.club_name as string) ?? "a club";
+      return {
+        label: "Club deleted",
+        sentence: (
+          <>
+            <strong>{actor}</strong> permanently deleted{" "}
+            <strong>{name}</strong>
+            {slug && <> (/{slug})</>}
+          </>
+        ),
+      };
+    }
+
     case "set_super_admin": {
       const value = !!details.value;
       return {

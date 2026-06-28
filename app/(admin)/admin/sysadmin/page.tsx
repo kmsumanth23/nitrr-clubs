@@ -11,6 +11,7 @@ import {
   IconTags,
   IconDatabase,
   IconStethoscope,
+  IconUpload,
 } from "@tabler/icons-react";
 import {
   isSysadmin,
@@ -54,6 +55,12 @@ export default async function SysadminPage() {
       desc: "Add a new club and assign its first lead.",
     },
     {
+      href: "/admin/sysadmin/bulk-import",
+      icon: IconUpload,
+      label: "Bulk import",
+      desc: "Upload a CSV to create many clubs at once.",
+    },
+    {
       href: "/admin/sysadmin/archived",
       icon: IconArchive,
       label: "Archived clubs",
@@ -93,7 +100,7 @@ export default async function SysadminPage() {
       href: "/admin/sysadmin/diagnostics",
       icon: IconStethoscope,
       label: "Diagnostics",
-      desc: "Read-only health checks (member count drift, etc).",
+      desc: "Drift checks; recompute member counters.",
     },
   ];
 

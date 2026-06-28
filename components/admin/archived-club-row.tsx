@@ -6,9 +6,11 @@ import { useFormStatus } from "react-dom";
 import { Modal } from "@/components/ui/modal";
 import { restoreClub, type SysadminResult } from "@/lib/actions/sysadmin";
 import type { ArchivedClub } from "@/lib/queries/sysadmin";
+import { PermanentDeleteModal } from "@/components/admin/permanent-delete-modal";
 
 export function ArchivedClubRow({ club }: { club: ArchivedClub }) {
-  const [open, setOpen] = React.useState(false);
+  const [restoreOpen, setRestoreOpen] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
 
   return (
     <li className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
@@ -20,20 +22,37 @@ export function ArchivedClubRow({ club }: { club: ArchivedClub }) {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-indigo hover:text-indigo"
-      >
-        Restore
-      </button>
+      <div className="flex flex-shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setRestoreOpen(true)}
+          className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-indigo hover:text-indigo"
+        >
+          Restore
+        </button>
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
+          className="rounded-full border border-clay/40 bg-white px-3 py-1 text-[11px] text-clay hover:bg-clay/5"
+        >
+          Delete permanently
+        </button>
+      </div>
 
-      <Modal open={open} onClose={() => setOpen(false)}>
+      <Modal open={restoreOpen} onClose={() => setRestoreOpen(false)}>
         <RestoreConfirm
           club={club}
-          onCancel={() => setOpen(false)}
+          onCancel={() => setRestoreOpen(false)}
         />
       </Modal>
+
+      <PermanentDeleteModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        clubId={club.id}
+        clubSlug={club.slug}
+        clubName={club.name}
+      />
     </li>
   );
 }

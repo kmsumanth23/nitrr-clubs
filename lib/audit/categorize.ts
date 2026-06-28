@@ -23,6 +23,7 @@ const CLUB_ACTIONS = new Set([
   "create_club",
   "decommission_club",
   "restore_club",
+  "permanent_delete_club",
 ]);
 const SUPER_ADMIN_ACTIONS = new Set(["set_super_admin"]);
 const MEMBER_ACTIONS = new Set(["publish_results", "remove_member"]);

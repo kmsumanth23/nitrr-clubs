@@ -4,6 +4,7 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { isSysadmin } from "@/lib/queries/sysadmin";
 import { getCounterDrift } from "@/lib/queries/counter-drift";
 import { CounterDriftTable } from "@/components/admin/counter-drift-table";
+import { RecomputeAllButton } from "@/components/admin/recompute-all-button";
 
 export const metadata = { title: "Diagnostics — Sysadmin" };
 export const dynamic = "force-dynamic";
@@ -28,7 +29,8 @@ export default async function SysadminDiagnosticsPage() {
         </h1>
         <p className="mt-1 text-sm text-ink-soft">
           Read-only health checks across the system. Drift is benign — it just
-          means a denormalized counter has fallen out of sync.
+          means a denormalized counter has fallen out of sync. Use Recompute to
+          bring it back in line with the actual data.
         </p>
       </div>
 
@@ -47,8 +49,14 @@ export default async function SysadminDiagnosticsPage() {
           Compares <code className="font-mono">clubs.member_count</code> (manual
           override) against the actual count of rows in{" "}
           <code className="font-mono">club_members</code> for each active club.
-          A recompute action will be added in 14c.
         </p>
+
+        {drift.length > 0 && (
+          <div className="mb-3">
+            <RecomputeAllButton />
+          </div>
+        )}
+
         <CounterDriftTable rows={drift} />
       </section>
     </section>

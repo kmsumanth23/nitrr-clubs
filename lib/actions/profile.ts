@@ -40,7 +40,17 @@ export async function completeProfile(
     .from("profiles")
     .update(parsed.data)
     .eq("id", user.id);
-  if (error) return { error: error.message };
+  if (error) {
+    // 23505 = unique_violation. After 14c_unique_roll.sql, a roll_number
+    // already claimed by another profile raises this. Surface a friendly
+    // message instead of the raw Postgres constraint name.
+    if (error.code === "23505" && error.message.includes("roll_number")) {
+      return {
+        error: "This roll number is already registered to another account.",
+      };
+    }
+    return { error: error.message };
+  }
 
   revalidatePath("/profile");
 

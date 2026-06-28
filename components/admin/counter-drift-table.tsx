@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RecomputeButton } from "@/components/admin/recompute-button";
 import type { CounterDriftRow } from "@/lib/queries/counter-drift";
 
 export function CounterDriftTable({ rows }: { rows: CounterDriftRow[] }) {
@@ -25,13 +26,16 @@ export function CounterDriftTable({ rows }: { rows: CounterDriftRow[] }) {
               Club
             </th>
             <th className="px-4 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-ink-soft">
-              Manual count
+              Manual
             </th>
             <th className="px-4 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-ink-soft">
-              Actual count
+              Actual
             </th>
             <th className="px-4 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-ink-soft">
               Drift
+            </th>
+            <th className="px-4 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-ink-soft">
+              Fix
             </th>
           </tr>
         </thead>
@@ -67,6 +71,9 @@ export function CounterDriftTable({ rows }: { rows: CounterDriftRow[] }) {
                   {r.drift > 0 ? "+" : ""}
                   {r.drift}
                 </span>
+              </td>
+              <td className="px-4 py-2.5 text-right">
+                <RecomputeButton clubId={r.club_id} />
               </td>
             </tr>
           ))}
