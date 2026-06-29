@@ -59,9 +59,11 @@ async function getCurrentRecruitments(
   return map;
 }
 
-/** Clubs the current user can manage. Sysadmin sees all (including archived,
- *  for restore purposes). Other admins see clubs they're admins of, excluding
- *  archived. */
+/** Clubs the current user can manage. Sysadmin sees all (including archived).
+ *  Non-sysadmin admins see clubs they're admins of, including archived
+ *  (rendered as read-only with a Decommissioned badge by the page).
+ *
+ *  Sort: active clubs first, then archived. Within each, by name. */
 export async function getMyAdminClubs(): Promise<AdminClub[]> {
   const supabase = await createClient();
   const {
@@ -84,16 +86,18 @@ export async function getMyAdminClubs(): Promise<AdminClub[]> {
   let rows: Row[] = [];
 
   if (isSuper) {
+    // Sysadmin: all clubs (active + archived). 14e: was `.is("archived_at", null)`.
     const { data, error } = await supabase
       .from("clubs")
       .select(
         "id, slug, name, member_count, is_recruiting, archived_at, category:categories(*)",
       )
-      .is("archived_at", null) // active only on the dashboard
       .order("name");
     if (error) throw error;
     rows = (data ?? []).map((c) => ({ tier: "lead" as AdminTier, club: c }));
   } else {
+    // Non-sysadmin: clubs they're admin of (active + archived). 14e: removed
+    // post-query filter that excluded archived.
     const { data, error } = await supabase
       .from("club_admins")
       .select(
@@ -107,8 +111,7 @@ export async function getMyAdminClubs(): Promise<AdminClub[]> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         club: (r as any).club,
       }))
-      // skip archived clubs from non-sysadmin views
-      .filter((r) => r.club && !r.club.archived_at);
+      .filter((r) => r.club); // drop any null-joins, keep archived
   }
 
   const clubIds = rows.map((r) => r.club.id);
@@ -117,13 +120,19 @@ export async function getMyAdminClubs(): Promise<AdminClub[]> {
   const enriched = await Promise.all(
     rows.map(async ({ tier, club }) => {
       const recruitment = recruitments.get(club.id) ?? null;
+      const isArchived = !!club.archived_at;
+
+      // For archived clubs, skip event + application counts — they're
+      // not actionable. Returns 0 / null for those fields.
       const [{ count: evCount }, appsCount] = await Promise.all([
-        supabase
-          .from("events")
-          .select("*", { count: "exact", head: true })
-          .eq("club_id", club.id)
-          .gt("starts_at", new Date().toISOString()),
-        tier === "editor"
+        isArchived
+          ? Promise.resolve({ count: 0 as number | null })
+          : supabase
+              .from("events")
+              .select("*", { count: "exact", head: true })
+              .eq("club_id", club.id)
+              .gt("starts_at", new Date().toISOString()),
+        isArchived || tier === "editor"
           ? Promise.resolve({ count: null as number | null })
           : recruitment
             ? supabase
@@ -150,7 +159,13 @@ export async function getMyAdminClubs(): Promise<AdminClub[]> {
     }),
   );
 
-  return enriched;
+  // Sort: active first, then archived. Within each, preserve name order.
+  return enriched.sort((a, b) => {
+    const aArch = a.archived_at ? 1 : 0;
+    const bArch = b.archived_at ? 1 : 0;
+    if (aArch !== bArch) return aArch - bArch;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 /** Editable club lookup. Sysadmin can access archived clubs (for restore);

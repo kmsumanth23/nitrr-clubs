@@ -20,7 +20,11 @@ export interface MyApplication extends Application {
 export interface MyMembership {
   club_id: string;
   joined_at: string;
-  club: (Pick<Club, "name" | "slug"> & { category: Category | null }) | null;
+  club:
+    | (Pick<Club, "name" | "slug" | "archived_at"> & {
+        category: Category | null;
+      })
+    | null;
 }
 
 export async function getMyProfile(): Promise<Profile | null> {
@@ -68,7 +72,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
         deadline: string | null;
         result_date: string | null;
         results_published_at: string | null;
-        club: { name: string; slug: string; category: Category | null } | null;
+        club: { name: string; slug: string; archived_at: string | null; category: Category | null } | null;
       } | null;
     }
   >).map((a) => ({
@@ -123,7 +127,7 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
   if (!user) return [];
   const { data, error } = await supabase
     .from("club_members")
-    .select("club_id, joined_at, club:clubs(name, slug, category:categories(*))")
+    .select("club_id, joined_at, club:clubs(name, slug, archived_at, category:categories(*))")
     .eq("profile_id", user.id)
     .order("joined_at", { ascending: false });
   if (error) throw error;

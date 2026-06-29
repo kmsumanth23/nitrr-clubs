@@ -12,7 +12,7 @@
 -- The trigger function already exists (from 12a); we modify it to check
 -- the GUC. CREATE OR REPLACE preserves the trigger attachment.
 
-create or replace function prevent_last_lead_removal()
+create or replace function protect_last_lead()
 returns trigger
 language plpgsql
 as $$

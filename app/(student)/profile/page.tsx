@@ -9,6 +9,7 @@ import {
 } from "@/lib/queries/profile";
 import { ProfileEditForm } from "@/components/profile/profile-edit-form";
 import { ApplicationsList } from "@/components/profile/applications-list";
+import { DecommissionedBadge } from "@/components/ui/decommissioned-badge";
 
 export const metadata = { title: "Profile — NITRR Clubs" };
 export const dynamic = "force-dynamic";
@@ -72,25 +73,40 @@ export default async function ProfilePage() {
             </p>
           ) : (
             <ul className="space-y-2">
-              {memberships.map((m) => (
-                <li
-                  key={m.club_id}
-                  className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4"
-                >
-                  <div className="min-w-0">
-                    <Link
-                      href={m.club ? `/clubs/${m.club.slug}` : "#"}
-                      className="block truncate text-sm font-medium text-ink hover:text-indigo"
-                    >
-                      {m.club?.name ?? "Club"}
-                    </Link>
-                    <div className="mt-0.5 text-xs text-ink-soft">
-                      {m.club?.category?.name ?? "Club"} · Joined{" "}
-                      {new Date(m.joined_at).toLocaleDateString("en-IN")}
+              {memberships.map((m) => {
+                const isArchived = !!m.club?.archived_at;
+                return (
+                  <li
+                    key={m.club_id}
+                    className={
+                      "flex items-center justify-between gap-3 rounded-2xl border bg-white p-4 " +
+                      (isArchived ? "border-clay/30 bg-cream/40" : "border-line")
+                    }
+                  >
+                    <div className="min-w-0 flex-1">
+                      {isArchived ? (
+                        <span className="block truncate text-sm font-medium text-ink-soft">
+                          {m.club?.name ?? "Club"}
+                        </span>
+                      ) : (
+                        <Link
+                          href={m.club ? `/clubs/${m.club.slug}` : "#"}
+                          className="block truncate text-sm font-medium text-ink hover:text-indigo"
+                        >
+                          {m.club?.name ?? "Club"}
+                        </Link>
+                      )}
+                      <div className="mt-0.5 text-xs text-ink-soft">
+                        {m.club?.category?.name ?? "Club"} · Joined{" "}
+                        {new Date(m.joined_at).toLocaleDateString("en-IN")}
+                      </div>
                     </div>
-                  </div>
-                </li>
-              ))}
+                    {isArchived && (
+                      <DecommissionedBadge archivedAt={m.club?.archived_at} />
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

@@ -13,6 +13,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { getMyAdminClubs } from "@/lib/queries/admin";
 import { isSysadmin } from "@/lib/queries/sysadmin";
+import { DecommissionedBadge } from "@/components/ui/decommissioned-badge";
 
 export const metadata = { title: "Admin — NITRR Clubs" };
 export const dynamic = "force-dynamic";
@@ -47,82 +48,102 @@ export default async function AdminDashboardPage() {
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {clubs.map((c) => (
-            <div
-              key={c.id}
-              className="flex flex-col rounded-2xl border border-line bg-white p-4"
-            >
-              <div className="mb-3 flex items-start justify-between gap-2">
-                <Link
-                  href={`/admin/clubs/${c.slug}`}
-                  className="flex-1 truncate text-sm font-semibold text-ink hover:text-indigo"
-                >
-                  {c.name}
-                </Link>
-                <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
-                  {c.tier}
-                </span>
-              </div>
+          {clubs.map((c) => {
+            const isArchived = !!c.archived_at;
+            // Sysadmin can manage archived clubs; non-sysadmin admins can't.
+            const canManage = !isArchived || isSuper;
 
-              <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-ink-soft">
-                {c.category?.name && (
-                  <span className="rounded-full bg-cream px-2 py-0.5">
-                    {c.category.name}
+            return (
+              <div
+                key={c.id}
+                className={
+                  "flex flex-col rounded-2xl border bg-white p-4 " +
+                  (isArchived ? "border-clay/30 bg-cream/40" : "border-line")
+                }
+              >
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  {canManage ? (
+                    <Link
+                      href={`/admin/clubs/${c.slug}`}
+                      className="flex-1 truncate text-sm font-semibold text-ink hover:text-indigo"
+                    >
+                      {c.name}
+                    </Link>
+                  ) : (
+                    <span className="flex-1 truncate text-sm font-semibold text-ink-soft">
+                      {c.name}
+                    </span>
+                  )}
+                  <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
+                    {c.tier}
                   </span>
-                )}
-                {c.is_recruiting && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-sport-soft px-2 py-0.5 text-sport">
-                    <IconCircleDot size={9} /> Recruiting
-                  </span>
-                )}
-              </div>
+                </div>
 
-              <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-                <Chip
-                  href={`/admin/clubs/${c.slug}`}
-                  icon={IconSettings}
-                  label="Edit"
-                />
-                <Chip
-                  href={`/admin/clubs/${c.slug}/events`}
-                  icon={IconCalendarEvent}
-                  label="Events"
-                  count={c.upcoming_events || undefined}
-                />
-                {c.tier !== "editor" && (
-                  <>
+                <div className="mb-3 flex flex-wrap gap-2 text-[11px] text-ink-soft">
+                  {c.category?.name && (
+                    <span className="rounded-full bg-cream px-2 py-0.5">
+                      {c.category.name}
+                    </span>
+                  )}
+                  {isArchived && (
+                    <DecommissionedBadge archivedAt={c.archived_at} />
+                  )}
+                  {!isArchived && c.is_recruiting && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sport-soft px-2 py-0.5 text-sport">
+                      <IconCircleDot size={9} /> Recruiting
+                    </span>
+                  )}
+                </div>
+
+                {canManage && (
+                  <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
                     <Chip
-                      href={`/admin/clubs/${c.slug}/applications`}
-                      icon={IconFileText}
-                      label="Applications"
-                      count={c.pending_applications ?? undefined}
+                      href={`/admin/clubs/${c.slug}`}
+                      icon={IconSettings}
+                      label="Edit"
                     />
                     <Chip
-                      href={`/admin/clubs/${c.slug}/members`}
-                      icon={IconUsers}
-                      label="Members"
+                      href={`/admin/clubs/${c.slug}/events`}
+                      icon={IconCalendarEvent}
+                      label="Events"
+                      count={c.upcoming_events || undefined}
                     />
-                  </>
+                    {c.tier !== "editor" && (
+                      <>
+                        <Chip
+                          href={`/admin/clubs/${c.slug}/applications`}
+                          icon={IconFileText}
+                          label="Applications"
+                          count={c.pending_applications ?? undefined}
+                        />
+                        <Chip
+                          href={`/admin/clubs/${c.slug}/members`}
+                          icon={IconUsers}
+                          label="Members"
+                        />
+                      </>
+                    )}
+                    <Chip
+                      href={`/admin/clubs/${c.slug}/admins`}
+                      icon={IconUserStar}
+                      label="Admins"
+                    />
+                    <Chip
+                      href={`/admin/clubs/${c.slug}/gallery`}
+                      icon={IconPhoto}
+                      label="Gallery"
+                    />
+                    <Chip
+                      href={`/clubs/${c.slug}`}
+                      icon={IconExternalLink}
+                      label="View"
+                      external
+                    />
+                  </div>
                 )}
-                <Chip
-                  href={`/admin/clubs/${c.slug}/admins`}
-                  icon={IconUserStar}
-                  label="Admins"
-                />
-                <Chip
-                  href={`/admin/clubs/${c.slug}/gallery`}
-                  icon={IconPhoto}
-                  label="Gallery"
-                />
-                <Chip
-                  href={`/clubs/${c.slug}`}
-                  icon={IconExternalLink}
-                  label="View"
-                  external
-                />
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
