@@ -1,10 +1,16 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { IconCalendar, IconMapPin, IconArrowLeft } from "@tabler/icons-react";
+import {
+  IconCalendar,
+  IconMapPin,
+  IconArrowLeft,
+  IconArchive,
+} from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { placeholderBg } from "@/components/ui/icon";
 import {
   getClubBySlug,
+  getArchivedClubBySlug,
   getAllClubSlugs,
 } from "@/lib/queries/clubs";
 
@@ -23,11 +29,23 @@ export async function generateMetadata({
 }) {
   const { slug } = await params;
   const club = await getClubBySlug(slug);
-  if (!club) return { title: "Club not found — NITRR Clubs" };
-  return {
-    title: `${club.name} — NITRR Clubs`,
-    description: club.tagline ?? club.description ?? undefined,
-  };
+  if (club) {
+    return {
+      title: `${club.name} — NITRR Clubs`,
+      description: club.tagline ?? club.description ?? undefined,
+    };
+  }
+
+  const archived = await getArchivedClubBySlug(slug);
+  if (archived) {
+    return {
+      title: `${archived.name} (decommissioned) — NITRR Clubs`,
+      description: `${archived.name} has been decommissioned.`,
+      robots: { index: false, follow: false },
+    };
+  }
+
+  return { title: "Club not found — NITRR Clubs" };
 }
 
 function fmtDate(iso: string | null): string {
@@ -46,7 +64,13 @@ export default async function ClubDetailPage({
 }) {
   const { slug } = await params;
   const club = await getClubBySlug(slug);
-  if (!club) notFound();
+  if (!club) {
+    const archived = await getArchivedClubBySlug(slug);
+    if (archived) {
+      return <DecommissionedClubPage archived={archived} />;
+    }
+    notFound();
+  }
 
   const color = club.category?.color ?? "#5B52E0";
   const cover = club.cover_url ?? club.logo_url;
@@ -223,6 +247,69 @@ export default async function ClubDetailPage({
             </div>
           </section>
         )}
+      </div>
+    </article>
+  );
+}
+
+function DecommissionedClubPage({
+  archived,
+}: {
+  archived: {
+    name: string;
+    slug: string;
+    tagline: string | null;
+    archived_at: string;
+    category: { name: string; color: string | null } | null;
+  };
+}) {
+  const archivedDate = new Date(archived.archived_at).toLocaleDateString(
+    "en-IN",
+    { day: "numeric", month: "long", year: "numeric" },
+  );
+
+  return (
+    <article className="container mx-auto max-w-2xl px-4 py-20 sm:py-32">
+      <Link
+        href="/clubs"
+        className="mb-8 inline-flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink"
+      >
+        <IconArrowLeft size={14} /> All clubs
+      </Link>
+
+      <div className="rounded-3xl border border-line bg-white p-8 text-center sm:p-12">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-clay/10 text-clay">
+          <IconArchive size={22} />
+        </div>
+
+        {archived.category?.name && (
+          <span className="mb-3 inline-block rounded-full bg-cream px-3 py-1 text-[11px] font-medium text-ink-soft">
+            {archived.category.name}
+          </span>
+        )}
+
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-ink sm:text-4xl">
+          {archived.name}
+        </h1>
+
+        {archived.tagline && (
+          <p className="mt-2 text-sm text-ink-soft">{archived.tagline}</p>
+        )}
+
+        <div className="mx-auto mt-6 max-w-md">
+          <p className="text-sm text-ink">
+            This club has been{" "}
+            <span className="font-semibold text-clay">decommissioned</span>.
+          </p>
+          <p className="mt-1 text-xs text-ink-soft">
+            Archived on {archivedDate}. The club is no longer active and is
+            not accepting applications.
+          </p>
+        </div>
+
+        <div className="mt-8">
+          <Button href="/clubs">Browse active clubs</Button>
+        </div>
       </div>
     </article>
   );

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   getMyProfile,
   getMyApplications,
-  getMyMemberships,
+  getMyProfileClubs,
   partitionApplications,
 } from "@/lib/queries/profile";
 import { ProfileEditForm } from "@/components/profile/profile-edit-form";
@@ -21,10 +21,10 @@ export default async function ProfilePage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/?signin=1");
 
-  const [profile, applications, memberships] = await Promise.all([
+  const [profile, applications, myClubs] = await Promise.all([
     getMyProfile(),
     getMyApplications(),
-    getMyMemberships(),
+    getMyProfileClubs(),
   ]);
   if (!profile) redirect("/?signin=1");
 
@@ -66,44 +66,49 @@ export default async function ProfilePage() {
           <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">
             My clubs
           </h2>
-          {memberships.length === 0 ? (
+          {myClubs.length === 0 ? (
             <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
               You&apos;re not in any clubs yet. Apply to one and once results
               are published, you&apos;ll see it here.
             </p>
           ) : (
             <ul className="space-y-2">
-              {memberships.map((m) => {
-                const isArchived = !!m.club?.archived_at;
+              {myClubs.map((c) => {
+                const isArchived = !!c.archived_at;
+                const isAdmin = c.role !== "member";
                 return (
                   <li
-                    key={m.club_id}
+                    key={c.club_id}
                     className={
                       "flex items-center justify-between gap-3 rounded-2xl border bg-white p-4 " +
                       (isArchived ? "border-clay/30 bg-cream/40" : "border-line")
                     }
                   >
                     <div className="min-w-0 flex-1">
-                      {isArchived ? (
-                        <span className="block truncate text-sm font-medium text-ink-soft">
-                          {m.club?.name ?? "Club"}
-                        </span>
-                      ) : (
-                        <Link
-                          href={m.club ? `/clubs/${m.club.slug}` : "#"}
-                          className="block truncate text-sm font-medium text-ink hover:text-indigo"
-                        >
-                          {m.club?.name ?? "Club"}
-                        </Link>
-                      )}
+                      <Link
+                        href={`/clubs/${c.slug}`}
+                        className="block truncate text-sm font-medium text-ink hover:text-indigo"
+                      >
+                        {c.name}
+                      </Link>
                       <div className="mt-0.5 text-xs text-ink-soft">
-                        {m.club?.category?.name ?? "Club"} · Joined{" "}
-                        {new Date(m.joined_at).toLocaleDateString("en-IN")}
+                        {c.category?.name ?? "Club"}
+                        {!isAdmin && c.joined_at && (
+                          <>
+                            {" "}· Joined{" "}
+                            {new Date(c.joined_at).toLocaleDateString("en-IN")}
+                          </>
+                        )}
                       </div>
                     </div>
-                    {isArchived && (
-                      <DecommissionedBadge archivedAt={m.club?.archived_at} />
-                    )}
+                    <div className="flex flex-shrink-0 items-center gap-2">
+                      <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
+                        {c.role}
+                      </span>
+                      {isArchived && (
+                        <DecommissionedBadge archivedAt={c.archived_at} />
+                      )}
+                    </div>
                   </li>
                 );
               })}

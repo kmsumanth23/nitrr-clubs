@@ -119,6 +119,99 @@ export function partitionApplications(apps: MyApplication[]): {
   return { active, history };
 }
 
+export interface MyProfileClub {
+  club_id: string;
+  slug: string;
+  name: string;
+  category: Category | null;
+  archived_at: string | null;
+  role: "lead" | "manager" | "editor" | "member";
+  /** For members: when they joined.
+   *  For admins-only: null (no joined_at; show role tag without date). */
+  joined_at: string | null;
+}
+
+/** Unified list of clubs to show in /profile My Clubs.
+ *
+ *  Includes:
+ *  - Clubs where user is an admin (any tier) — tagged with their role
+ *  - Clubs where user is a member (via club_members) — tagged "member"
+ *
+ *  When user is BOTH admin and member of the same club, admin wins
+ *  (role tier shown, not "member"). Sorted: active first, then archived;
+ *  within each, by name. */
+export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  // Fetch admin clubs and member clubs in parallel
+  const [adminRes, memberRes] = await Promise.all([
+    supabase
+      .from("club_admins")
+      .select(
+        "admin_role, club:clubs(id, slug, name, archived_at, category:categories(*))",
+      )
+      .eq("profile_id", user.id),
+    supabase
+      .from("club_members")
+      .select(
+        "joined_at, club:clubs(id, slug, name, archived_at, category:categories(*))",
+      )
+      .eq("profile_id", user.id),
+  ]);
+
+  const byClubId = new Map<string, MyProfileClub>();
+
+  // Admin clubs first (so they take precedence on dedup)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const r of (adminRes.data ?? []) as any[]) {
+    if (!r.club) continue;
+    byClubId.set(r.club.id, {
+      club_id: r.club.id,
+      slug: r.club.slug,
+      name: r.club.name,
+      category: r.club.category ?? null,
+      archived_at: r.club.archived_at ?? null,
+      role: r.admin_role,
+      joined_at: null,
+    });
+  }
+
+  // Members — only add if not already present from admin side
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const r of (memberRes.data ?? []) as any[]) {
+    if (!r.club) continue;
+    if (byClubId.has(r.club.id)) {
+      // Already added as admin — fill in joined_at if missing, keep admin role
+      const existing = byClubId.get(r.club.id)!;
+      if (!existing.joined_at) existing.joined_at = r.joined_at;
+      continue;
+    }
+    byClubId.set(r.club.id, {
+      club_id: r.club.id,
+      slug: r.club.slug,
+      name: r.club.name,
+      category: r.club.category ?? null,
+      archived_at: r.club.archived_at ?? null,
+      role: "member",
+      joined_at: r.joined_at,
+    });
+  }
+
+  // Sort: active first, then archived. Within each, by name.
+  return [...byClubId.values()].sort((a, b) => {
+    const aArch = a.archived_at ? 1 : 0;
+    const bArch = b.archived_at ? 1 : 0;
+    if (aArch !== bArch) return aArch - bArch;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/** @deprecated since 14f — use {@link getMyProfileClubs} for the unified
+ *  admin+member view. Retained for any external/future consumer. */
 export async function getMyMemberships(): Promise<MyMembership[]> {
   const supabase = await createClient();
   const {

@@ -135,6 +135,40 @@ export async function getClubBySlug(slug: string): Promise<ClubDetail | null> {
   };
 }
 
+/** Minimal lookup for an archived club. Returns null if the slug doesn't
+ *  exist or is still active (active clubs are handled by getClubBySlug). */
+export interface ArchivedClubInfo {
+  id: string;
+  slug: string;
+  name: string;
+  category: Category | null;
+  archived_at: string;
+  tagline: string | null;
+}
+
+export async function getArchivedClubBySlug(
+  slug: string,
+): Promise<ArchivedClubInfo | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("clubs")
+    .select("id, slug, name, tagline, archived_at, category:categories(*)")
+    .eq("slug", slug)
+    .not("archived_at", "is", null)
+    .maybeSingle();
+  if (error || !data) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const d = data as any;
+  return {
+    id: d.id,
+    slug: d.slug,
+    name: d.name,
+    tagline: d.tagline ?? null,
+    archived_at: d.archived_at,
+    category: d.category ?? null,
+  };
+}
+
 /** All slugs of ACTIVE clubs — for generateStaticParams. */
 export async function getAllClubSlugs(): Promise<string[]> {
   const supabase = createStaticClient();
