@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { sendAdminAssignedEmail } from "@/lib/email/send-admin-assigned";
 import {
   addAdminSchema,
   removeAdminSchema,
@@ -23,12 +24,36 @@ export async function addClubAdmin(
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { error } = await supabase.rpc("add_club_admin", {
     club_id_in: parsed.data.clubId,
     profile_id_in: parsed.data.profileId,
     tier_in: parsed.data.tier,
   });
   if (error) return { error: error.message };
+
+  // 15b: Send admin-assigned email (fire-and-forget)
+  if (user) {
+    try {
+      const emailRes = await sendAdminAssignedEmail({
+        kind: "club_admin",
+        recipientProfileId: parsed.data.profileId,
+        actorProfileId: user.id,
+        clubId: parsed.data.clubId,
+        tier: parsed.data.tier,
+      });
+      if (!emailRes.ok) {
+        console.error(
+          "addClubAdmin: admin-assigned email failed:",
+          emailRes.error,
+        );
+      }
+    } catch (e) {
+      console.error("addClubAdmin: admin-assigned email threw:", e);
+    }
+  }
 
   revalidatePath(`/admin/clubs/${clubSlug}/admins`);
   revalidatePath(`/admin/clubs/${clubSlug}`);

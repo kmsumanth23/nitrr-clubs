@@ -12,6 +12,7 @@ import {
   IconDatabase,
   IconStethoscope,
   IconUpload,
+  IconMail,
 } from "@tabler/icons-react";
 import {
   isSysadmin,
@@ -101,6 +102,12 @@ export default async function SysadminPage() {
       icon: IconStethoscope,
       label: "Diagnostics",
       desc: "Drift checks; recompute member counters.",
+    },
+    {
+      href: "/admin/sysadmin/email-test",
+      icon: IconMail,
+      label: "Email test",
+      desc: "Send a test email to verify Resend is configured.",
     },
   ];
 

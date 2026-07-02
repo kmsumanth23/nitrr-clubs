@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { sendAdminAssignedEmail } from "@/lib/email/send-admin-assigned";
 import {
   setSuperAdminSchema,
   createClubSchema,
@@ -22,11 +23,33 @@ export async function setSuperAdmin(
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const { error } = await supabase.rpc("set_super_admin", {
     profile_id_in: parsed.data.profileId,
     value_in: parsed.data.value,
   });
   if (error) return { error: error.message };
+
+  // 15b: Send sysadmin-assigned email on grant only (not on revoke)
+  if (parsed.data.value && user) {
+    try {
+      const emailRes = await sendAdminAssignedEmail({
+        kind: "sysadmin",
+        recipientProfileId: parsed.data.profileId,
+        actorProfileId: user.id,
+      });
+      if (!emailRes.ok) {
+        console.error(
+          "setSuperAdmin: sysadmin-assigned email failed:",
+          emailRes.error,
+        );
+      }
+    } catch (e) {
+      console.error("setSuperAdmin: sysadmin-assigned email threw:", e);
+    }
+  }
 
   revalidatePath("/admin/sysadmin/super-admins");
   revalidatePath("/admin/sysadmin");

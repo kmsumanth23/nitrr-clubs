@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getPhase } from "@/lib/phase";
+import { sendApplicationResultEmails } from "@/lib/email/send-application-results";
 import type { ApplicationStatus } from "@/lib/database.types";
 
 export type ReviewResult = { error?: string; ok?: boolean };
@@ -143,6 +144,25 @@ export async function publishResults(
     recruitment_id_in: recruitmentId,
   });
   if (error) return { error: error.message };
+
+  // 15a: Send result emails to all applicants. Failures don't roll back
+  // the publish. We log them; the DB state is correct regardless.
+  try {
+    const emailReport = await sendApplicationResultEmails(recruitmentId);
+    console.log(
+      `publish_results emails: ${emailReport.succeeded}/${emailReport.attempted} sent; ${emailReport.failed} failed`,
+    );
+    if (emailReport.failures.length > 0) {
+      console.error(
+        "publish_results email failures:",
+        JSON.stringify(emailReport.failures, null, 2),
+      );
+    }
+  } catch (e) {
+    // Defensive — sendApplicationResultEmails shouldn't throw, but if it does,
+    // we don't want to fail the action.
+    console.error("publish_results email batch threw:", e);
+  }
 
   revalidatePath(`/admin/clubs/${clubSlug}/applications`);
   revalidatePath(`/admin/clubs/${clubSlug}`);
