@@ -17,8 +17,14 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    // 15c: code exchange failed — likely expired or already used.
+    // Send to verify-email with error state so they can resend.
+    console.error("auth callback: code exchange failed:", error);
+    return NextResponse.redirect(
+      `${origin}/auth/verify-email?status=expired`,
+    );
   }
 
-  // Something went wrong — back to home.
+  // No code parameter at all — unusual, back to home.
   return NextResponse.redirect(`${origin}/`);
 }

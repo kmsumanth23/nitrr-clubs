@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import { IconBrandGoogle } from "@tabler/icons-react";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -26,11 +27,22 @@ export function AuthModal({
   onClose: () => void;
   next?: string;
 }) {
+  const router = useRouter();
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
   const isSignup = mode === "signup";
 
   const action = isSignup ? signUp : signInWithPassword;
   const [state, formAction] = useActionState<AuthResult, FormData>(action, {});
+
+  // 15c: signUp returns checkInbox when email verification is pending.
+  // Navigate to the verify-email page and close the modal.
+  React.useEffect(() => {
+    if (state.checkInbox && state.email) {
+      const email = encodeURIComponent(state.email);
+      router.push(`/auth/verify-email?email=${email}`);
+      onClose();
+    }
+  }, [state.checkInbox, state.email, router, onClose]);
 
   return (
     <Modal open={open} onClose={onClose}>
