@@ -148,9 +148,3 @@ and profile search must show if searching already existing user.
 test direct access linkss if redirects are working or not
 
 when a signed in user is deleted there is a glitch the profile button and signout button are still visible though when clicked on them redirects to signin, and the glitch goes away only when clicked on signout.
-
-two major issues with 15c
-
-the verification page is still stuck no response to redirect to profile page even after verification
-
-and when clicked on the confirm mail it takes you to the web homepage the vercel app one where the user is not signed in and when i sign in i get the profile compleation page and after that i recive the welcome email.

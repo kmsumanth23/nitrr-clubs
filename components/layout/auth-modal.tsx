@@ -4,6 +4,7 @@ import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { IconBrandGoogle } from "@tabler/icons-react";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -86,6 +87,18 @@ export function AuthModal({
           placeholder="Password"
           className="mb-1 w-full rounded-[10px] border border-line bg-white p-2.5 text-[13px] text-ink outline-none focus:border-indigo"
         />
+
+        {!isSignup && (
+          <div className="mt-1 mb-2 text-right">
+            <Link
+              href="/auth/forgot-password"
+              onClick={onClose}
+              className="text-[11px] text-ink-soft hover:text-indigo hover:underline"
+            >
+              Forgot password?
+            </Link>
+          </div>
+        )}
 
         {state.error && (
           <p className="mb-1 mt-2 text-center text-xs text-clay">

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import Link from "next/link";
 import { updateProfile, type ProfileResult } from "@/lib/actions/profile";
 import { BRANCHES } from "@/lib/validation/profile";
 import type { Profile } from "@/lib/database.types";
@@ -46,6 +47,14 @@ export function ProfileEditForm({ profile }: { profile: Profile }) {
           <Field label="Branch" value={profile.branch} />
           <Field label="Gender" value={profile.gender ?? "—"} />
         </dl>
+        <div className="mt-5 border-t border-line pt-4 text-right">
+          <Link
+            href="/auth/reset-password"
+            className="text-xs text-ink-soft hover:text-indigo hover:underline"
+          >
+            Change password →
+          </Link>
+        </div>
       </div>
     );
   }

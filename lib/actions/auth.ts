@@ -152,3 +152,133 @@ export async function resendVerification(
 
   return { ok: true };
 }
+
+/** Request a password reset email.
+ *  Anti-enumeration: shows "check inbox" success regardless of whether
+ *  the email exists in Supabase. Only surfaces rate-limit errors. */
+export async function requestPasswordReset(
+  _prev: AuthResult,
+  formData: FormData,
+): Promise<AuthResult> {
+  const email = ((formData.get("email") as string) ?? "").trim();
+
+  // Validate
+  const emailCheck = z.string().email().max(200).safeParse(email);
+  if (!emailCheck.success) {
+    return { error: "Enter a valid email address." };
+  }
+
+  const supabase = await createClient();
+  const origin = (await headers()).get("origin") ?? "http://localhost:3000";
+
+  // Fixed redirect target — no user input here (security: no open redirect surface).
+  // The `?recovery=1` marker tells /auth/reset-password to render in recovery
+  // mode (no current-password field). Regular in-app change-password uses the
+  // same page without the marker.
+  const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(
+    "/auth/reset-password?recovery=1",
+  )}`;
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+
+  if (error) {
+    console.error("requestPasswordReset failed:", error);
+    const msg = error.message.toLowerCase();
+    // Translate rate-limit errors to plain English
+    if (
+      msg.includes("rate") ||
+      msg.includes("for security purposes") ||
+      msg.includes("too many")
+    ) {
+      return {
+        error:
+          "Please wait a minute before requesting another reset email.",
+      };
+    }
+    // For any other error, return the anti-enumeration success shape.
+    // The specific error is logged for us; the user sees "check inbox."
+    return { ok: true, checkInbox: true, email };
+  }
+
+  return { ok: true, checkInbox: true, email };
+}
+
+/** Update the current user's password. Requires an active session
+ *  (either a recovery session from a reset link, or a regular signed-in
+ *  session for in-app password change). */
+export async function updatePassword(
+  _prev: AuthResult,
+  formData: FormData,
+): Promise<AuthResult> {
+  const password = (formData.get("password") as string) ?? "";
+  const confirm = (formData.get("confirm") as string) ?? "";
+  const currentPassword = (formData.get("current_password") as string) ?? "";
+
+  // Validate — same length as signup (6 chars min).
+  const check = z
+    .object({
+      password: z.string().min(6, "Password must be at least 6 characters"),
+      confirm: z.string(),
+    })
+    .refine((d) => d.password === d.confirm, {
+      message: "Passwords do not match.",
+      path: ["confirm"],
+    })
+    .safeParse({ password, confirm });
+
+  if (!check.success) {
+    return { error: check.error.issues[0].message };
+  }
+
+  const supabase = await createClient();
+
+  // Verify session before updating.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return {
+      error:
+        "Session expired. Please request a new password reset link.",
+    };
+  }
+
+  // In-app change (as opposed to recovery-link flow): the form sends
+  // `current_password`. Supabase's `require_current_password_when_updating`
+  // setting rejects updateUser({ password }) on a regular session without
+  // reauthentication. We verify the current password by re-signing in the
+  // user — succeeds only if they know the current one, refreshes the token,
+  // and then updateUser is accepted.
+  if (currentPassword) {
+    const { error: signInErr } = await supabase.auth.signInWithPassword({
+      email: user.email!,
+      password: currentPassword,
+    });
+    if (signInErr) {
+      return { error: "Current password is incorrect." };
+    }
+  }
+
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    console.error("updatePassword failed:", error);
+    const msg = error.message.toLowerCase();
+    if (msg.includes("same") || msg.includes("different")) {
+      return {
+        error: "New password must be different from the current one.",
+      };
+    }
+    if (msg.includes("current password required")) {
+      return {
+        error:
+          "Please enter your current password before setting a new one.",
+      };
+    }
+    return { error: error.message };
+  }
+
+  // Success: hardcoded redirect to /profile — no user-controllable next
+  redirect("/profile");
+}
