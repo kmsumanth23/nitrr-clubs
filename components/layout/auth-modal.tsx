@@ -13,6 +13,7 @@ import {
   signInWithGoogle,
   type AuthResult,
 } from "@/lib/actions/auth";
+import { isAllowedEmail, ALLOWED_DOMAINS_HINT } from "@/lib/auth/policy";
 
 /**
  * Sign in / sign up modal wired to Supabase via server actions.
@@ -31,9 +32,19 @@ export function AuthModal({
   const router = useRouter();
   const [mode, setMode] = React.useState<"signin" | "signup">("signin");
   const isSignup = mode === "signup";
+  const [emailValue, setEmailValue] = React.useState("");
 
   const action = isSignup ? signUp : signInWithPassword;
   const [state, formAction] = useActionState<AuthResult, FormData>(action, {});
+
+  // 15e: show the domain hint only in signup mode, and only once the user
+  // has typed a complete-looking email (past the @ with at least one char
+  // after) whose domain isn't on the allowlist. Silent otherwise.
+  const showEmailHint =
+    isSignup &&
+    emailValue.includes("@") &&
+    emailValue.indexOf("@") < emailValue.length - 1 &&
+    !isAllowedEmail(emailValue);
 
   // 15c: signUp returns checkInbox when email verification is pending.
   // Navigate to the verify-email page and close the modal.
@@ -78,8 +89,15 @@ export function AuthModal({
           type="email"
           required
           placeholder="Email"
-          className="mb-2.5 w-full rounded-[10px] border border-line bg-white p-2.5 text-[13px] text-ink outline-none focus:border-indigo"
+          value={emailValue}
+          onChange={(e) => setEmailValue(e.target.value)}
+          className="mb-1 w-full rounded-[10px] border border-line bg-white p-2.5 text-[13px] text-ink outline-none focus:border-indigo"
         />
+        {showEmailHint && (
+          <p className="mb-2 text-[11px] text-clay">
+            {ALLOWED_DOMAINS_HINT}
+          </p>
+        )}
         <input
           name="password"
           type="password"

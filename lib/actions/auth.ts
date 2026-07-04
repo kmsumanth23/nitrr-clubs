@@ -4,6 +4,11 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import {
+  normalizeEmail,
+  isAllowedEmail,
+  ALLOWED_DOMAINS_HINT,
+} from "@/lib/auth/policy";
 
 const credsSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -39,8 +44,16 @@ export async function signInWithPassword(
     return { error: parsed.error.issues[0].message };
   }
 
+  // 15e: Normalize before calling Supabase — matches the normalization
+  // applied at signup. Without this, users who signed up with a Gmail
+  // variant would be locked out of their own account.
+  const normalizedEmail = normalizeEmail(parsed.data.email);
+
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  const { error } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: parsed.data.password,
+  });
   if (error) return { error: error.message };
 
   const next = safeNext(formData);
@@ -60,6 +73,17 @@ export async function signUp(
     return { error: parsed.error.issues[0].message };
   }
 
+  // 15e: Normalize the email BEFORE any Supabase interaction so
+  // `sumanth+a@gmail.com` and `sumanth@gmail.com` map to one account.
+  const normalizedEmail = normalizeEmail(parsed.data.email);
+
+  // 15e: Allowlist gate — hard reject non-allowlisted domains.
+  if (!isAllowedEmail(normalizedEmail)) {
+    return {
+      error: `That email provider isn't supported. ${ALLOWED_DOMAINS_HINT}`,
+    };
+  }
+
   const supabase = await createClient();
   const next = safeNext(formData);
   const origin = (await headers()).get("origin") ?? "http://localhost:3000";
@@ -76,7 +100,8 @@ export async function signUp(
   )}`;
 
   const { data, error } = await supabase.auth.signUp({
-    ...parsed.data,
+    email: normalizedEmail,
+    password: parsed.data.password,
     options: { emailRedirectTo },
   });
   if (error) return { error: error.message };
@@ -89,7 +114,7 @@ export async function signUp(
 
   // Case 2: Session pending email verification.
   // Return checkInbox so the modal can navigate to /auth/verify-email.
-  return { checkInbox: true, email: parsed.data.email };
+  return { checkInbox: true, email: normalizedEmail };
 }
 
 /** Begin Google OAuth — returns the URL to redirect the browser to. */
@@ -119,6 +144,10 @@ export async function resendVerification(
     return { error: "Invalid email address." };
   }
 
+  // 15e: Normalize for consistency with signup. No allowlist gate — anyone
+  // with a pending verification presumably passed the signup allowlist check.
+  const normalizedEmail = normalizeEmail(email);
+
   const supabase = await createClient();
   const origin = (await headers()).get("origin") ?? "http://localhost:3000";
 
@@ -128,7 +157,7 @@ export async function resendVerification(
 
   const { error } = await supabase.auth.resend({
     type: "signup",
-    email,
+    email: normalizedEmail,
     options: { emailRedirectTo },
   });
   if (error) {
@@ -168,6 +197,12 @@ export async function requestPasswordReset(
     return { error: "Enter a valid email address." };
   }
 
+  // 15e: Normalize for consistency with signup. NO allowlist gate here —
+  // rejecting non-allowlisted emails would leak that they're not on the list,
+  // which reduces the anti-enumeration security value. Supabase silently
+  // swallows unknowns; we mirror the same "check inbox" response either way.
+  const normalizedEmail = normalizeEmail(email);
+
   const supabase = await createClient();
   const origin = (await headers()).get("origin") ?? "http://localhost:3000";
 
@@ -179,7 +214,7 @@ export async function requestPasswordReset(
     "/auth/reset-password?recovery=1",
   )}`;
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
     redirectTo,
   });
 
@@ -199,10 +234,10 @@ export async function requestPasswordReset(
     }
     // For any other error, return the anti-enumeration success shape.
     // The specific error is logged for us; the user sees "check inbox."
-    return { ok: true, checkInbox: true, email };
+    return { ok: true, checkInbox: true, email: normalizedEmail };
   }
 
-  return { ok: true, checkInbox: true, email };
+  return { ok: true, checkInbox: true, email: normalizedEmail };
 }
 
 /** Update the current user's password. Requires an active session
