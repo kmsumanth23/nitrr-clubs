@@ -14,6 +14,7 @@ const PILLS: { key: AuditCategory; label: string }[] = [
   { key: "all", label: "All" },
   { key: "club_admins", label: CATEGORY_LABEL.club_admins },
   { key: "clubs", label: CATEGORY_LABEL.clubs },
+  { key: "drives", label: CATEGORY_LABEL.drives }, // 16A
   { key: "super_admins", label: CATEGORY_LABEL.super_admins },
   { key: "members", label: CATEGORY_LABEL.members },
 ];

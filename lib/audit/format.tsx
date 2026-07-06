@@ -143,6 +143,50 @@ export function formatAuditEntry(entry: AuditEntry): {
         ),
       };
 
+    case "create_drive": {
+      const name = (details.name as string) ?? "a drive";
+      const targetYears = details.target_years as number[] | undefined;
+      const yearsLabel =
+        targetYears && targetYears.length > 0
+          ? ` for Year ${targetYears.join(", ")}`
+          : "";
+      return {
+        label: "Drive created",
+        sentence: (
+          <>
+            <strong>{actor}</strong> created drive{" "}
+            <strong>{name}</strong>
+            {yearsLabel}
+          </>
+        ),
+      };
+    }
+
+    case "publish_drive": {
+      const qCount = (details.question_count as number) ?? 0;
+      return {
+        label: "Drive published",
+        sentence: (
+          <>
+            <strong>{actor}</strong> published a drive ({qCount} question
+            {qCount === 1 ? "" : "s"})
+          </>
+        ),
+      };
+    }
+
+    case "delete_drive": {
+      const phase = (details.phase_at_deletion as string) ?? "unknown";
+      return {
+        label: "Drive deleted",
+        sentence: (
+          <>
+            <strong>{actor}</strong> deleted a drive (was in {phase})
+          </>
+        ),
+      };
+    }
+
     default:
       return {
         label: entry.action,
