@@ -14,10 +14,16 @@ import {
   swapQuestionOrderSchema,
 } from "@/lib/validation/drive";
 
-/** Common result shape for drive actions. */
-export type DriveResult =
-  | { ok: true; driveId?: string; questionId?: string }
-  | { error: string };
+/** Common result shape for drive actions. Flat all-optional (matches the
+ *  AuthResult / ClubEditResult / ReviewResult convention) so `useActionState`
+ *  can be seeded with `{}` and consumers can access `state.error` / `state.ok`
+ *  without narrowing. */
+export type DriveResult = {
+  error?: string;
+  ok?: boolean;
+  driveId?: string;
+  questionId?: string;
+};
 
 function revalidateDrive(clubSlug: string, driveId?: string) {
   revalidatePath(`/admin/clubs/${clubSlug}/recruitment`);

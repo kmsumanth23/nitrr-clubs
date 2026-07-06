@@ -305,3 +305,65 @@ Ready for Batch 3 — the UI layer:
 - Removal or repurposing of `components/admin/recruitment-section.tsx` (Batch 1 deferred this)
 
 Say "Batch 2 clean" (or wait for the UI to smoke-test) and I'll pick up Batch 3 when you send it.
+
+---
+
+# 16A Round 2 Batch 3a — Building-block components (User-applied + type fix)
+
+Four new presentational/interactive components (dropped in by the user directly). Only backend touchpoint was fixing one type shape that Batch 2 got wrong.
+
+## What shipped
+
+Files dropped by the user (no code changes made by me):
+- `components/admin/target-years-picker.tsx` — controlled Year 1-4 chip multi-select
+- `components/admin/drive-list-row.tsx` — one row of the drive list on the recruitment page
+- `components/admin/question-editor-row.tsx` — per-row inline auto-save (blur on textarea, click on type button, change on required toggle) + reorder + delete
+- `components/admin/question-builder.tsx` — list wrapper with "Add question" button
+
+## Bug caught by typecheck (fixed inline)
+
+**Root cause:** `DriveResult` in [lib/actions/drive.ts](lib/actions/drive.ts) was defined as a discriminated union in Batch 2:
+
+```ts
+export type DriveResult =
+  | { ok: true; driveId?: string; questionId?: string }
+  | { error: string };
+```
+
+Batch 3a's components followed the standard project pattern of seeding `useActionState` with `{}` — which matches neither variant. TypeScript couldn't infer `State` cleanly and fell back to `Payload = void` on the returned `formAction`, cascading into 15 errors across 2 files:
+
+- Line 49 / 75 / 233 / 289 — `{}` not assignable to `DriveResult` (4 errors)
+- Line 78 / 85 / 92 — "Expected 0 arguments, but got 1" on `formAction(buildFormData(...))` (3 errors)
+- Line 88 / 89 / 183 / 184 / 293 / 294 / 315 (×2) — `state.error` / `state.ok` failing to narrow (8 errors)
+
+**Fix:** Flattened the type to match the project convention used by `AuthResult`, `ClubEditResult`, `ReviewResult`:
+
+```ts
+export type DriveResult = {
+  error?: string;
+  ok?: boolean;
+  driveId?: string;
+  questionId?: string;
+};
+```
+
+All 8 action bodies still compile — they were already returning either `{ ok: true, ... }` or `{ error: ... }`, both valid under the flat shape.
+
+## Retroactive note on Batch 2
+
+The Batch 2 audit called `DriveResult` a "discriminated union mirrors `ReviewResult` pattern from `admin-application.ts`." That was actually incorrect — `ReviewResult = { error?: string; ok?: boolean }` is a flat union, not discriminated. Batch 2 accidentally introduced the stricter shape. Batch 3a's components exposed it. Now fixed.
+
+**Lesson worth noting:** when defining a result type for a new action module, mirror an existing project pattern by *reading it*, not by naming it from memory. `ReviewResult` looks like it should be a discriminated union but isn't. Cf. CLAUDE.md Lesson 24 ("Before writing any 'REPLACE' file, search project knowledge for the actual current contents").
+
+## Verification
+
+**Typecheck:** clean via `npm run typecheck`.
+
+## What's next
+
+Ready for Batch 3b — the page rewrites:
+- `components/admin/drive-editor-form.tsx` — full drive create/edit form (composed from Batch 3a components)
+- `app/(admin)/admin/clubs/[slug]/recruitment/page.tsx` — REWRITE (drive list)
+- `app/(admin)/admin/clubs/[slug]/recruitment/new/page.tsx` — NEW
+- `app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx` — NEW
+- Removal or repurposing of `components/admin/recruitment-section.tsx`
