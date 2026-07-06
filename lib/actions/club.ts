@@ -122,11 +122,14 @@ export async function updateRecruitment(
     .single();
   if (clubErr) return { error: clubErr.message };
 
-  // Find current (most-recent) recruitment, if any
+  // Find current (most-recent published) recruitment, if any. 16A: skip
+  // drafts — this legacy action doesn't manage draft state; the new drive
+  // editor uses update_drive RPC instead.
   const { data: recRow } = await supabase
     .from("recruitments")
     .select("id, results_published_at")
     .eq("club_id", parsed.data.clubId)
+    .not("published_at", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

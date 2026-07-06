@@ -33,6 +33,7 @@ export async function getAllClubs(): Promise<ClubWithCategory[]> {
     .from("recruitments")
     .select("id, club_id, deadline, results_published_at, created_at")
     .in("club_id", ids)
+    .not("published_at", "is", null) // 16A: exclude drafts
     .order("created_at", { ascending: false });
 
   const recMap = new Map<
@@ -113,6 +114,7 @@ export async function getClubBySlug(slug: string): Promise<ClubDetail | null> {
       .from("recruitments")
       .select("id, deadline, results_published_at")
       .eq("club_id", clubId)
+      .not("published_at", "is", null) // 16A: exclude drafts
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),

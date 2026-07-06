@@ -148,3 +148,19 @@ and profile search must show if searching already existing user.
 test direct access linkss if redirects are working or not
 
 when a signed in user is deleted there is a glitch the profile button and signout button are still visible though when clicked on them redirects to signin, and the glitch goes away only when clicked on signout.
+
+Banner system: sysadmin can post a site-wide announcement (e.g. "Recruitment season starts Monday")
+
+Step 17 — Data export advanced + reporting
+
+PDF export (client-side library, pdf-lib)
+Per-cycle recruitment report (applications received, accept rate, demographics)
+Annual club activity report
+Export to JSON for backup confidence
+
+About 8-10 files.
+Step 18 — Polish + extras
+Things that won't fit elsewhere. Health checks, broadcast notifications via a banner, profile/user management for sysadmin (edit, hard delete with cascade analysis), data import variants, etc. Loose collection.
+
+Annual club activity reports
+JSON backup format

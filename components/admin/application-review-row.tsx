@@ -93,6 +93,11 @@ function ApplicationDetail({
   onClose: () => void;
 }) {
   const r = (app.responses ?? {}) as Responses;
+  // 16A: applications shouldn't exist against a draft drive (trigger blocks
+  // it); if one somehow reaches this row, render nothing rather than
+  // showing action buttons that would fail server-side.
+  if (phase === "draft") return null;
+
   const isFinal =
     app.status === "withdrawn" ||
     app.status === "removed" ||

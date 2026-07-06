@@ -1,0 +1,222 @@
+# 16A Round 1 — Complete
+
+## What's in place
+
+**SQL migrations** copied to [supabase/16a_drive_schema.sql](supabase/16a_drive_schema.sql) and [supabase/16a_drive_rpcs.sql](supabase/16a_drive_rpcs.sql). Both files use `create ... if not exists` and the schema file guards its constraint drop, so they're safe to re-run.
+
+**CLAUDE.md** — all 7 edits applied:
+1. Step ledger — 15a-e moved to Done; 16a-d added to Left with 16a marked in-progress
+2. Schema block — `recruitments` updated with `description`/`target_years`/`published_at`; new `drive_questions` block added directly below
+3. Key SQL functions — new "Drive management (16A)" subsection with all 8 RPCs; existing `recruitment_phase` + `enforce_application_phase` entries annotated with the draft-phase change
+4. Audit category mapping — new "Drives (16A)" row
+5. Step 16 design — old "per-position" sketch replaced with the drives-are-the-unit final design
+6. Lessons 25 (two-tab auth patterns) + 26 (auth implementation gotchas) appended
+7. Lifecycle diagram — DRAFT column added; WhatsApp reveals repositioned to REVIEW + RESULT columns; "step 16" reference updated to "step 16C"
+
+---
+
+# 16A Round 2 — Blast Radius Audit
+
+Doing this now so you have the map before we ship code. I traced every import + string reference across `lib/`, `app/`, `components/`.
+
+## Files that MUST change in round 2
+
+### Tier 1 — foundational (touches types + phase enum)
+
+| File | Why it must change |
+|---|---|
+| [lib/database.types.ts](lib/database.types.ts) | Add generated types for `drive_questions` table + new `recruitments` columns (`description`, `target_years`, `published_at`). Currently line 26 shows `Row: { club_id, created_at, id, note, note_at, note_by, profile_id, recruitment_id, responses, status, updated_at }` on `applications` — needs regen after Supabase migration runs. |
+| [lib/phase.ts](lib/phase.ts) | Line 1: `Phase = "open" \| "review" \| "result"` → add `"draft"`. `getPhase()` needs a new input branch reading `published_at`. `phaseLabel`, `studentMessage`, `PHASE_BADGE` need `draft` cases. |
+
+### Tier 2 — recruitment-page UI (rewrite)
+
+| File | Why it must change |
+|---|---|
+| [app/(admin)/admin/clubs/[slug]/recruitment/page.tsx](app/(admin)/admin/clubs/[slug]/recruitment/page.tsx) | Currently loads a single `current_recruitment` via `getEditableClub` and passes it to `<RecruitmentSection>`. New shape needs a `listDrivesForClub(clubId)` query + list view + "New drive" button. |
+| [components/admin/recruitment-section.tsx](components/admin/recruitment-section.tsx) | Whole "edit-the-single-current-recruitment" model becomes obsolete. This component gets replaced by a `<DriveListView>` per the SETUP file map. |
+| [lib/queries/admin.ts](lib/queries/admin.ts) | `getEditableClub` returns `current_recruitment` — that's an OK shape to keep for now (backward compat for other consumers like `applications/page.tsx`), but the recruitment page should stop reading it in favor of the new `listDrivesForClub`. |
+
+### Tier 3 — phase enum consumers (add draft branch)
+
+31 phase-string usages across 6 files. Every `switch(phase)` or `phase === "open"` chain needs a `"draft"` case:
+
+| File | Change needed |
+|---|---|
+| [app/(admin)/admin/clubs/[slug]/applications/page.tsx](app/(admin)/admin/clubs/[slug]/applications/page.tsx) | Phase banner (`phase === "open"`, `"review"`, `"result"`) — add draft branch: probably "Drive is in draft, no applications yet — publish to open." |
+| [components/admin/application-review-row.tsx](components/admin/application-review-row.tsx) | Same shape of `phase === "open"` branches — likely just needs `if (phase === "draft") return null` or similar. |
+| [components/admin/recruitment-section.tsx](components/admin/recruitment-section.tsx) | Will be rewritten (Tier 2) — carry draft into the new UI. |
+| [components/profile/application-row.tsx](components/profile/application-row.tsx) | Student-side phase display. Draft shouldn't reach students since apps can't be created in draft phase, but defensive `if (phase === "draft") return "—"` is worth adding. |
+| [lib/actions/admin-application.ts](lib/actions/admin-application.ts) | `setApplicationStatus` currently rejects on `phase === "open"` and `phase === "result"`. Add: reject on `phase === "draft"` too. Same file has `publishResults` — it currently doesn't check phase, relies on the RPC. Still fine. |
+| [lib/phase.ts](lib/phase.ts) | Already Tier 1. |
+
+### Tier 4 — applications page + queries (drive-scoped, not club-scoped)
+
+Currently `getApplicationsForClub(clubId)` in [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) loads applications for the club's **most-recent** recruitment. That's still correct-ish while 16A runs (drives ARE recruitments underneath), but two issues:
+
+1. The "most-recent" logic will start including drafts. Any newly-created draft would push the actually-open recruitment out of the "current" slot. **This is the most subtle regression risk in 16A.** Fix: filter `published_at is not null` when picking the "current" row, OR let the admin pick which drive to view.
+2. Longer-term (16B) each drive should have its own applications view. That's 16B scope, but 16A needs to at least not silently break existing applications workflow.
+
+**Recommendation for 16A:** patch `getApplicationsForClub` to `.not("published_at", "is", null)` when picking "current." Cheap defensive change, buys correctness during the coexistence window.
+
+### Tier 5 — student apply flow (defensive draft check)
+
+| File | Change needed |
+|---|---|
+| [app/(student)/clubs/[slug]/apply/page.tsx](app/(student)/clubs/[slug]/apply/page.tsx) | Line 45 selects the "current" recruitment same way. If a lead creates a draft drive, this would return the draft and set `open = false` (deadline is likely in the future for a draft, and `published_at is null`). Since `is_recruiting` still gates the whole page, the draft never leaks to students, BUT the recruitment shown to students should filter `.not("published_at", "is", null)` for correctness. |
+| [lib/actions/application.ts](lib/actions/application.ts) | Line 44-51 — same "get current recruitment" pattern. The trigger update (`enforce_application_phase` blocks draft) is the belt+suspenders defense here. Adding the JS-level filter is polish. |
+
+### Tier 6 — new files to create (per SETUP file map)
+
+| File | Purpose |
+|---|---|
+| `lib/queries/admin-drives.ts` | `listDrivesForClub(clubId)`, `getDriveWithQuestions(driveId)` |
+| `lib/validation/drive.ts` | Zod schemas for create/update drive + question CRUD |
+| `lib/actions/drive.ts` | 8 server actions wrapping the 8 RPCs |
+| `app/(admin)/admin/clubs/[slug]/recruitment/new/page.tsx` | Drive create form |
+| `app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx` | Drive editor form |
+| `components/admin/drive-list-row.tsx` | Row in list view |
+| `components/admin/drive-editor-form.tsx` | Create/edit form (shared shape) |
+| `components/admin/target-years-picker.tsx` | Year 1-4 chip multi-select |
+| `components/admin/question-builder.tsx` | Questions list + inline edit + reorder |
+| `components/admin/question-editor-row.tsx` | Single question row |
+
+## Files that must NOT change in 16A (deliberately)
+
+Called out because they're tempting refactor targets, but the SETUP explicitly defers them:
+
+| File | Why deferred |
+|---|---|
+| [lib/validation/application.ts](lib/validation/application.ts) | Hardcodes `motivation` / `experience` / `contribution` fields. 16A doesn't touch the apply flow — those 3 field names still work because the backfill inserts them as `drive_questions` rows. Per-drive dynamic questions come in 16B. |
+| [components/clubs/apply-form.tsx](components/clubs/apply-form.tsx) | Same — 16B refactor. |
+| [lib/actions/application.ts](lib/actions/application.ts) `submitApplication` | Same — 16B refactor. Only the "get current recruitment" query needs the `published_at` filter (Tier 5). |
+| [lib/actions/recruitment.ts](lib/actions/recruitment.ts) `startNewRecruitment` | Still callable during 16A/16B — it creates a recruitment with `published_at = created_at` (via the migration backfill logic), which means non-draft. Coexistence is fine. Removal is 16D. |
+| [lib/actions/club.ts](lib/actions/club.ts) `updateRecruitment` | Still needed — it edits deadline/result_date on the "current" recruitment + toggles `is_recruiting`. Same coexistence caveat. |
+| `clubs.is_recruiting` consumers (10 files) | Explicitly deferred to step 16D per the SETUP. |
+
+## Coexistence risks I want to name explicitly
+
+**1. The "most-recent recruitment" query pattern is now broken by drafts.** This pattern appears in:
+- [lib/queries/admin.ts](lib/queries/admin.ts) `getEditableClub` (line 192-198)
+- [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) `getApplicationsForClub` (line 34-40), `getApplicationHistoryForClub` (line 104-108), `getApplicationCountsForClub` (line 65-71)
+- [lib/queries/clubs.ts](lib/queries/clubs.ts) `getClubBySlug` (subquery on recruitments)
+- [lib/queries/home.ts](lib/queries/home.ts) — check needed
+- [lib/actions/application.ts](lib/actions/application.ts) `submitApplication` (line 44-51)
+- [lib/actions/club.ts](lib/actions/club.ts) `updateRecruitment` (line 126-132)
+- [app/(student)/clubs/[slug]/apply/page.tsx](app/(student)/clubs/[slug]/apply/page.tsx) (line 45-51)
+
+Every one of these should add `.not("published_at", "is", null)` OR `.is("published_at", ..)` filter appropriate to context. This is the biggest single review item for round 2 and I recommend a dedicated commit for it, cleanly named "16A: filter drafts from most-recent-recruitment queries."
+
+**2. `updateRecruitment` semantics for drafts.** Currently it edits the "current" recruitment's deadline/result_date. If we filter out drafts (fix #1 above), then `updateRecruitment` targets the most-recent-published — which may not be the one the admin thinks they're editing. The recruitment page is being rewritten anyway (Tier 2), so `updateRecruitment` becomes callable only from legacy paths. Safe if the recruitment page's new UI doesn't use it. Recommendation: **do not delete `updateRecruitment` in 16A**; the new drive-editor form uses `update_drive` RPC instead. Leave the old action untouched.
+
+**3. Audit log needs new categorize entries.** [lib/audit/categorize.ts](lib/audit/categorize.ts) will need `create_drive`, `publish_drive`, `delete_drive` added to the "clubs" category (or a new "drives" category per the CLAUDE.md patch). [lib/audit/format.tsx](lib/audit/format.tsx) needs sentence templates for those three action strings. Not blocking anything, but if we skip it, the new audit entries will render as their raw action name.
+
+**4. The `enforce_application_phase` trigger update.** The SQL migration replaces `enforce_application_phase`. The trigger already exists and is registered to the `applications` table. Replacing the function body is safe — no trigger disable/enable needed. But: **verify in the SQL editor** after running that the new definition is what's actually installed (Lesson 3).
+
+## Recommended round-2 shipping order
+
+Given the interdependencies:
+
+1. **Migration first** — you run the SQL manually. Confirm sanity checks (uncommented queries at the bottom of `16a_drive_schema.sql`).
+2. **Types + phase** — regenerate `database.types.ts`, extend `Phase` in `lib/phase.ts`, add draft case to `PHASE_BADGE`/`phaseLabel`/`studentMessage`. This alone touches 6 files with `phase === ...` branches. `tsc --noEmit` after.
+3. **Draft-filter defensive patch** — apply `.not("published_at", "is", null)` filter to the ~8 queries listed above. One focused commit, easy to review.
+4. **Drive queries + validation + actions** — pure additions, no existing code touched.
+5. **Drive editor form + supporting components** — pure additions.
+6. **Recruitment page rewrite** — the risky one. Preserve the "no drives yet" empty state so existing admin muscle memory still works.
+7. **Audit categorize + format** — small, additive.
+
+Between steps 2 and 3, the app will typecheck but there'll be a window where "current recruitment" queries could hit a draft. Not user-visible in local dev, but worth being aware of.
+
+## One thing to confirm before round 2 code drops
+
+The SETUP says publish gate requires "deadline set." The SQL RPC `publish_drive` enforces `if drive_deadline is null then raise exception`. But `create_drive` accepts `deadline_in timestamptz` which can be null — meaning a draft can exist without a deadline, and the admin has to fill it in before publishing.
+
+**Question:** should the drive editor UI *require* deadline at draft-save time, or only at publish time? The SETUP is ambiguous. The SQL is permissive at draft-save, strict at publish. I'd recommend the UI mirrors the SQL (allow null deadline in draft, require it on publish) — matches the "save as draft = incomplete OK" mental model. Flagging in case you want the opposite.
+
+---
+
+Ready for round 2 whenever you send it. I'll ship the code in the order above unless you tell me otherwise.
+
+---
+
+# 16A Round 2 Batch 1 — Foundation (Shipped)
+
+Types + phase enum + draft-filter defensive patches. 15 files touched. Typecheck clean.
+
+## What shipped
+
+### Tier 1 — Foundation
+
+| Change | File | Notes |
+|---|---|---|
+| REPLACE | [lib/phase.ts](lib/phase.ts) | `Phase = "draft" \| "open" \| "review" \| "result"`. `getPhase()` checks `published_at` first: `!published_at → "draft"`. `phaseLabel("draft") → "Draft"`. `studentMessage` gets a draft fallback. `PHASE_BADGE.draft = "bg-beige text-ink-soft"` (neutral, admin-only). |
+| SKIP | [lib/database.types.ts](lib/database.types.ts) | Already regenerated by the user via Supabase CLI. Verified: `drive_questions` table at line 364, plus `description` (line 591), `published_at` (line 596), `target_years` (line 600) on `recruitments` Row. All 8 drive RPCs present in Functions block. |
+
+### Tier 2 — Phase-consumer patches
+
+| Change | File | Notes |
+|---|---|---|
+| PATCH | [app/(admin)/admin/clubs/[slug]/applications/page.tsx](app/(admin)/admin/clubs/[slug]/applications/page.tsx) | Added `phase === "draft"` banner (`"This drive isn't published yet. Publish it to start accepting applications."`) above the existing open/review/result branches. |
+| PATCH | [components/admin/application-review-row.tsx](components/admin/application-review-row.tsx) | Added defensive `if (phase === "draft") return null;` at the top of `ApplicationDetail`'s render — applications shouldn't reach here for a draft (trigger blocks + query filter), but the belt+suspenders keeps the row inert if they do. |
+| PATCH | [components/profile/application-row.tsx](components/profile/application-row.tsx) | Extended `displayStatus` with a draft branch that returns `{ label: "—", style: STATUS_STYLES.pending }`. Simpler than a full row replacement — pill just renders inertly. |
+| PATCH | [lib/actions/admin-application.ts](lib/actions/admin-application.ts) | Added `if (phase === "draft") return { error: ... }` to `setApplicationStatus` before the open/result checks. |
+| SKIP | [components/admin/recruitment-section.tsx](components/admin/recruitment-section.tsx) | No code change needed — `PHASE_BADGE[phase]` and `phaseLabel(phase)` are already draft-aware via the new phase.ts. The `phase === "open"` / `"review"` / `"result"` prose chain is non-exhaustive and simply renders empty for draft (which the draft filter prevents anyway). Batch 3 rewrites this file entirely. |
+
+### Tier 3 — Draft-filter defensive patches
+
+Every "most-recent recruitment" query gets `.not("published_at", "is", null)`. Same shape everywhere: one line inserted immediately before `.order("created_at", { ascending: false })`.
+
+| # | File | Function | Consumer impact |
+|---|---|---|---|
+| 1 | [lib/queries/admin.ts](lib/queries/admin.ts) | `getEditableClub` | Admin's per-club edit + recruitment pages get the current published drive, not any draft. |
+| 2 | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | `getApplicationsForClub` | Applications page shows the published drive's apps. |
+| 3 | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | `getApplicationCountsForClub` | Counts match the shown applications. |
+| 4 | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | `getApplicationHistoryForClub` | History never includes abandoned drafts. |
+| 5 | [lib/queries/clubs.ts](lib/queries/clubs.ts) | `getAllClubs` (`recs` bulk query) | Public clubs listing derives per-club current from published drives only. |
+| 6 | [lib/queries/clubs.ts](lib/queries/clubs.ts) | `getClubBySlug` (`recRes` subquery) | Public club detail page same. |
+| 7 | [lib/actions/application.ts](lib/actions/application.ts) | `submitApplication` | Student-submit path: if a club only has drafts, error out with `"This club isn't accepting applications right now."` instead of falling through to the trigger's harsher error. |
+| 8 | [app/(student)/clubs/[slug]/apply/page.tsx](app/(student)/clubs/[slug]/apply/page.tsx) | apply-page fetch | Student-facing apply UI never sees a draft. |
+| 9 | [lib/actions/club.ts](lib/actions/club.ts) | `updateRecruitment` | Legacy action operates only on the current published drive. This action is only reachable from the pre-16A recruitment-section UI, which Batch 3 rewrites. Kept for compat. |
+
+### Tier 4 — Caught by the final sweep
+
+| # | File | Function | Notes |
+|---|---|---|---|
+| 10 | [lib/queries/admin.ts](lib/queries/admin.ts) | `getCurrentRecruitments` (private dashboard helper) | This wasn't in the SETUP's 9-item list but is the same "most-recent per club" pattern (grouped across all clubIds the admin sees). A draft would silently push the actually-open drive out of the dashboard card. Fixed. |
+
+## What I explicitly did NOT do
+
+- **`lib/queries/home.ts`** — confirmed by inspection: has no `recruitments` query at all. The homepage widgets read `clubs`, `events`, `categories`, `faqs`, `gallery_photos`. The SETUP hedged ("if it references recruitments"); it doesn't. No patch needed.
+- **`lib/queries/sysadmin.ts:65`** — `supabase.from("recruitments").select("*", { count: "exact", head: true })` returns the total-recruitments count on the sysadmin landing card. That's an aggregate observability metric — arguably counting drafts belongs there (it reflects real DB state). No patch.
+- **Full rewrite of `components/admin/recruitment-section.tsx`** — Batch 3 does this. Batch 1 minimum was verifying the badge/label helpers now handle draft, which the new `PHASE_BADGE` + `phaseLabel` do.
+
+## Coexistence risk that materialized (and was closed)
+
+The blast-radius audit at the top called out that "the 'most-recent recruitment' query pattern is now broken by drafts" as the biggest regression risk. Batch 1 closes it. **After Batch 1, no admin or student UI can ever see a draft** — drafts are visible only when queried explicitly by drive id (which no consumer does yet; Batch 2 introduces those queries).
+
+Trigger-level defense (from Round 1 SQL) still stands: `enforce_application_phase` blocks application insert/update against a draft. Belt + suspenders.
+
+## Verification
+
+**Typecheck:** clean via `npm run typecheck`.
+
+**Final sweep:** `grep -rn -B1 -A4 "from(\"recruitments\")" ./lib ./app ./components` shows every remaining recruitments query either (a) has the `.not("published_at", "is", null)` filter, (b) is the sysadmin count query (deliberately unfiltered), or (c) is a write UPDATE targeting an already-selected row.
+
+**Smoke test** (per SETUP — user runs):
+- SQL: `select create_drive((select id from clubs where slug='shaurya'), 'Test Draft 16A Batch 1', 'Testing draft filter', array[1,2], now() + interval '7 days', now() + interval '14 days');`
+- Visit `/admin/clubs/shaurya` → still shows the existing published recruitment; the test draft is invisible.
+- Visit `/admin/clubs/shaurya/applications` → still shows published recruitment's apps.
+- SQL: `select recruitment_phase(id) from recruitments where name='Test Draft 16A Batch 1';` → `'draft'`.
+- Cleanup: `select delete_drive((select id from recruitments where name='Test Draft 16A Batch 1'));`
+
+## What's next
+
+Ready for Batch 2:
+- `lib/queries/admin-drives.ts` — `listDrivesForClub`, `getDriveWithQuestions`
+- `lib/validation/drive.ts` — Zod schemas
+- `lib/actions/drive.ts` — 8 server actions wrapping the 8 RPCs
+- `lib/audit/categorize.ts` — `create_drive` / `publish_drive` / `delete_drive` category assignment
+- `lib/audit/format.tsx` — sentence templates for those 3 action strings
+
+Batch 3 (after Batch 2 lands): drive editor components + pages + recruitment page rewrite.
+
+Say "Batch 1 clean" once the smoke test passes on your end and I'll pick up Batch 2 when you send it.

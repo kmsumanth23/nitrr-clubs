@@ -38,6 +38,11 @@ function displayStatus(
     return { label: "Withdrawn", style: STATUS_STYLES.withdrawn };
   if (app.status === "removed")
     return { label: "Removed", style: STATUS_STYLES.removed };
+  // 16A: draft shouldn't reach students (the drive is admin-only until
+  // publish, and the trigger blocks applications against drafts). Kept
+  // as a defensive fallback so the pill renders inertly.
+  if (phase === "draft")
+    return { label: "—", style: STATUS_STYLES.pending };
   if (phase === "review")
     return { label: "Under review", style: REVIEW_STYLE };
   const label = app.status.charAt(0).toUpperCase() + app.status.slice(1);

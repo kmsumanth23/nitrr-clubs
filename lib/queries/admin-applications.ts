@@ -35,6 +35,7 @@ export async function getApplicationsForClub(
     .from("recruitments")
     .select("id, name, deadline, result_date, results_published_at, created_at")
     .eq("club_id", clubId)
+    .not("published_at", "is", null) // 16A: exclude drafts
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -66,6 +67,7 @@ export async function getApplicationCountsForClub(
     .from("recruitments")
     .select("id")
     .eq("club_id", clubId)
+    .not("published_at", "is", null) // 16A: exclude drafts
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -105,6 +107,7 @@ export async function getApplicationHistoryForClub(
     .from("recruitments")
     .select("id, name, deadline, result_date, results_published_at, created_at")
     .eq("club_id", clubId)
+    .not("published_at", "is", null) // 16A: exclude drafts (never shown in history)
     .order("created_at", { ascending: false });
   if (recErr) throw recErr;
   if (!recs || recs.length < 2) return []; // need at least 2 to have history

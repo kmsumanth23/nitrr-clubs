@@ -41,11 +41,13 @@ export default async function ApplyPage({
     redirect(`/profile/complete?next=/clubs/${slug}/apply`);
   }
 
-  // Current (latest) recruitment for the club — deadline lives here now.
+  // Current (latest) PUBLISHED recruitment for the club — 16A: draft
+  // drives are admin-only until published.
   const { data: recruitment } = await supabase
     .from("recruitments")
     .select("id, deadline")
     .eq("club_id", club.id)
+    .not("published_at", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

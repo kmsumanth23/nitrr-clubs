@@ -71,6 +71,9 @@ export async function setApplicationStatus(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rec: any = app.recruitment;
   const phase = getPhase(rec);
+  if (phase === "draft") {
+    return { error: "Drive is a draft. Publish it before deciding applications." };
+  }
   if (phase === "open") {
     return {
       error:

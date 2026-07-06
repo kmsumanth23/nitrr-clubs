@@ -66,6 +66,13 @@ export default async function AdminApplicationsPage({
   const currentView = (
     <>
       <div className="mb-6 rounded-2xl border border-line bg-white p-4 text-sm">
+        {phase === "draft" && (
+          <p className="text-ink-soft">
+            <span className="font-medium text-ink">Draft.</span>{" "}
+            This drive isn&apos;t published yet. Publish it to start
+            accepting applications.
+          </p>
+        )}
         {phase === "open" && (
           <p className="text-ink-soft">
             <span className="font-medium text-ink">Open phase.</span>{" "}

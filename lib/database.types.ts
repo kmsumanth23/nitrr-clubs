@@ -361,6 +361,44 @@ export type Database = {
           },
         ]
       }
+      drive_questions: {
+        Row: {
+          created_at: string
+          id: string
+          prompt: string
+          question_type: string
+          recruitment_id: string
+          required: boolean
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          prompt: string
+          question_type?: string
+          recruitment_id: string
+          required?: boolean
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          prompt?: string
+          question_type?: string
+          recruitment_id?: string
+          required?: boolean
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drive_questions_recruitment_id_fkey"
+            columns: ["recruitment_id"]
+            isOneToOne: false
+            referencedRelation: "recruitments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       events: {
         Row: {
           club_id: string
@@ -550,39 +588,48 @@ export type Database = {
           created_at: string
           created_by: string | null
           deadline: string | null
+          description: string | null
           id: string
           interview_mode: string | null
           interview_whatsapp_link: string | null
           name: string | null
+          published_at: string | null
           result_date: string | null
           results_published_at: string | null
           results_published_by: string | null
+          target_years: number[]
         }
         Insert: {
           club_id: string
           created_at?: string
           created_by?: string | null
           deadline?: string | null
+          description?: string | null
           id?: string
           interview_mode?: string | null
           interview_whatsapp_link?: string | null
           name?: string | null
+          published_at?: string | null
           result_date?: string | null
           results_published_at?: string | null
           results_published_by?: string | null
+          target_years?: number[]
         }
         Update: {
           club_id?: string
           created_at?: string
           created_by?: string | null
           deadline?: string | null
+          description?: string | null
           id?: string
           interview_mode?: string | null
           interview_whatsapp_link?: string | null
           name?: string | null
+          published_at?: string | null
           result_date?: string | null
           results_published_at?: string | null
           results_published_by?: string | null
+          target_years?: number[]
         }
         Relationships: [
           {
@@ -617,6 +664,15 @@ export type Database = {
         Args: { club_id_in: string; profile_id_in: string; tier_in: string }
         Returns: undefined
       }
+      add_drive_question: {
+        Args: {
+          drive_id_in: string
+          prompt_in: string
+          question_type_in: string
+          required_in: boolean
+        }
+        Returns: string
+      }
       can_edit_club_content: { Args: { target_club: string }; Returns: boolean }
       can_manage_admins: { Args: { target_club: string }; Returns: boolean }
       can_manage_applications: {
@@ -645,6 +701,17 @@ export type Database = {
         }
         Returns: string
       }
+      create_drive: {
+        Args: {
+          club_id_in: string
+          deadline_in: string
+          description_in: string
+          name_in: string
+          result_date_in: string
+          target_years_in: number[]
+        }
+        Returns: string
+      }
       current_recruitment_for_club: {
         Args: { club_id_in: string }
         Returns: string
@@ -652,6 +719,11 @@ export type Database = {
       decommission_club: { Args: { club_id_in: string }; Returns: undefined }
       delete_archived_club: {
         Args: { club_id_in: string; slug_confirm: string }
+        Returns: undefined
+      }
+      delete_drive: { Args: { drive_id_in: string }; Returns: undefined }
+      delete_drive_question: {
+        Args: { question_id_in: string }
         Returns: undefined
       }
       get_counter_drift: {
@@ -686,6 +758,7 @@ export type Database = {
       }
       is_club_admin: { Args: { target_club: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
+      publish_drive: { Args: { drive_id_in: string }; Returns: undefined }
       publish_recruitment_results: {
         Args: { recruitment_id_in: string }
         Returns: undefined
@@ -736,8 +809,32 @@ export type Database = {
         Args: { id_a: string; id_b: string }
         Returns: undefined
       }
+      swap_drive_question_order: {
+        Args: { question_a_in: string; question_b_in: string }
+        Returns: undefined
+      }
       swap_faq_order: {
         Args: { id_a: string; id_b: string }
+        Returns: undefined
+      }
+      update_drive: {
+        Args: {
+          deadline_in: string
+          description_in: string
+          drive_id_in: string
+          name_in: string
+          result_date_in: string
+          target_years_in: number[]
+        }
+        Returns: undefined
+      }
+      update_drive_question: {
+        Args: {
+          prompt_in: string
+          question_id_in: string
+          question_type_in: string
+          required_in: boolean
+        }
         Returns: undefined
       }
     }

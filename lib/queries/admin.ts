@@ -43,6 +43,7 @@ async function getCurrentRecruitments(
     .from("recruitments")
     .select("id, club_id, name, deadline, result_date, results_published_at, created_at")
     .in("club_id", clubIds)
+    .not("published_at", "is", null) // 16A: exclude drafts (dashboard cards)
     .order("created_at", { ascending: false });
   const map = new Map<string, RecruitmentRow>();
   for (const r of (data ?? []) as Array<RecruitmentRow & { club_id: string }>) {
@@ -208,6 +209,7 @@ export async function getEditableClub(
     .from("recruitments")
     .select("id, name, deadline, result_date, results_published_at")
     .eq("club_id", c.id)
+    .not("published_at", "is", null) // 16A: exclude drafts
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

@@ -40,15 +40,18 @@ export async function submitApplication(
   if (!club) return { error: "Club not found." };
   if (!club.is_recruiting) return { error: "This club is not currently recruiting." };
 
-  // Current recruitment for the club
+  // Current recruitment for the club (16A: exclude drafts — students never
+  // see them; the trigger also blocks apps against drafts, but returning a
+  // friendlier error before we hit the trigger is nicer UX).
   const { data: rec } = await supabase
     .from("recruitments")
     .select("id, deadline, result_date, results_published_at")
     .eq("club_id", clubId)
+    .not("published_at", "is", null)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!rec) return { error: "No active recruitment for this club." };
+  if (!rec) return { error: "This club isn't accepting applications right now." };
 
   const phase = getPhase(rec);
   if (phase !== "open") return { error: "Applications are closed for this recruitment." };

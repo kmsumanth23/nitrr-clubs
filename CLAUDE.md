@@ -112,12 +112,24 @@ club_members (club_id FK, profile_id FK, joined_at,
 
 club_team (id PK, club_id FK, name, position, photo_url, sort_order)
 
-recruitments (id PK, club_id FK, name,
+recruitments (id PK, club_id FK, name, description,
+              target_years int[] DEFAULT '{1,2,3,4}'  -- 16A: subset of {1,2,3,4}
+                CHECK (array_length(target_years,1) between 1 and 4
+                       and target_years <@ array[1,2,3,4]),
               deadline timestamptz, result_date timestamptz,
+              published_at timestamptz null,          -- 16A: null = draft
               results_published_at, results_published_by FK,
               interview_whatsapp_link text,
               interview_mode text CHECK in (online|offline|hybrid),
               created_by FK, created_at)
+
+drive_questions (id PK, recruitment_id FK ON DELETE CASCADE,
+                 prompt text, sort_order int, required bool,
+                 question_type text CHECK in (short_text|long_text)
+                   DEFAULT 'long_text',
+                 created_at)
+  -- 16A added: each drive owns its own question set
+  -- Public read RLS; writes via SECURITY DEFINER RPCs only
 
 applications (id PK, club_id FK, profile_id FK,
               recruitment_id FK NOT NULL,
@@ -143,12 +155,24 @@ audit_log (id PK, actor_id FK, action text, target_club_id FK,
 ### Key SQL functions
 
 **Recruitment lifecycle:**
-- `recruitment_phase(uuid) → 'open' | 'review' | 'result'`
+- `recruitment_phase(uuid) → 'draft' | 'open' | 'review' | 'result'` — 16A added `'draft'`; draft check comes first (published_at is null)
 - `current_recruitment_for_club(uuid) → uuid`
-- `enforce_application_phase()` trigger — honors `app.bypass_phase_check = 'true'` GUC for legitimate admin operations
+- `enforce_application_phase()` trigger — honors `app.bypass_phase_check = 'true'` GUC for legitimate admin operations; 16A: blocks application create/edit against drives in `draft` phase
 - `publish_recruitment_results(uuid)` — lead-only, gated on zero pending/reviewing; writes `publish_results` audit entry with `members_added` count (12c)
 - `start_new_recruitment(...)` — lead/manager
 - `remove_member(uuid, uuid)` — SECURITY DEFINER, lead/sysadmin only; writes `remove_member` audit entry (12c)
+
+**Drive management (16A):**
+- `create_drive(club_id, name, description, target_years, deadline, result_date) → uuid` — lead/sysadmin; creates in draft mode (`published_at = null`); auto-populates 3 default questions; writes `create_drive` audit entry
+- `update_drive(drive_id, name, description, target_years, deadline, result_date)` — lead/manager/sysadmin; blocked in review/result phases
+- `publish_drive(drive_id)` — lead/sysadmin; requires target_years non-empty + deadline set + ≥1 question; writes `publish_drive` audit entry
+- `delete_drive(drive_id)` — lead/sysadmin; draft: unrestricted; open with zero applications: allowed; open with any applications OR review/result: blocked; writes `delete_drive` audit entry
+- `add_drive_question(drive_id, prompt, question_type, required) → uuid` — lead/manager/sysadmin; blocked in review/result
+- `update_drive_question(question_id, prompt, question_type, required)` — lead/manager/sysadmin; blocked in review/result
+- `delete_drive_question(question_id)` — lead/manager/sysadmin; blocked in review/result
+- `swap_drive_question_order(id_a, id_b)` — lead/manager/sysadmin; atomic swap of two questions' sort_order; blocked in review/result
+
+Question CRUD (add/update/delete/swap) is NOT audit-logged — high-volume + low-value.
 
 **Admin management (12a):**
 - `can_manage_club_admins(uuid)` — true for lead of that club OR sysadmin
@@ -198,6 +222,7 @@ All admin-management actions write to `audit_log`. Append-only — no edits, no 
 | Clubs | `create_club`, `decommission_club`, `restore_club`, `permanent_delete_club` (14d) |
 | Super admins | `set_super_admin` |
 | Members | `publish_results`, `remove_member` |
+| Drives (16A) | `create_drive`, `publish_drive`, `delete_drive` |
 
 Club content edits (description, social links, member count) are intentionally NOT logged — too noisy, low value. Recompute counter actions (14c) also NOT logged — they're reconciliations, not substantive changes.
 
@@ -247,16 +272,18 @@ CSV parser is inline at `lib/csv/parse.ts` — no dependency. Handles quoted fie
 ## Recruitment lifecycle (the core model)
 
 ```
-  ┌──────────┐   deadline    ┌────────────┐   publish    ┌──────────┐
-  │   OPEN   │ ────────────▶ │   REVIEW   │ ───────────▶ │  RESULT  │
-  └──────────┘   passes      └────────────┘  (lead-only) └──────────┘
-   • student CRUD              • admin decides            • locked
-   • no decisions              • student locked           • members materialized
-                               • interview WhatsApp        from accepteds
-                                 reveals (step 16)
+  ┌──────────┐   publish   ┌──────────┐   deadline    ┌────────────┐   publish    ┌──────────┐
+  │  DRAFT   │────────────▶│   OPEN   │─────────────▶│   REVIEW   │─────────────▶│  RESULT  │
+  └──────────┘  (lead)     └──────────┘   passes     └────────────┘  results     └──────────┘
+   • admin only              • student CRUD            • admin decides            • locked
+   • not visible             • no decisions            • student locked           • members materialized
+   • edit freely                                       • interview WhatsApp          from accepteds
+                                                        revealed (step 16C)       • community WhatsApp
+                                                                                    revealed to accepteds
+                                                                                    (step 16C)
 ```
 
-Each "Start new recruitment" inserts a new `recruitments` row. Old rows stay as history. Students can re-apply in future recruitments (different row), not in the same one (unique constraint blocks).
+Each "Start new recruitment" (pre-16A) OR each `create_drive` (16A onwards) inserts a new `recruitments` row. Old rows stay as history. Students can re-apply in future recruitments (different row), not in the same one (unique constraint blocks).
 
 Status semantics:
 - `pending` / `reviewing` — submitted / being reviewed
@@ -338,13 +365,20 @@ For archived clubs: sysadmin can still access all sub-pages (sees existing "deco
 | 14d | Permanent delete archived clubs with three-layer caution (button → modal → type-to-confirm slug) + Bulk import inline help |
 | 14e | Decommissioned badges on /admin (all tiers) + /profile My Clubs; queries no longer filter archived |
 | 14f | Public `/clubs/[slug]` shows minimal decommissioned card (was 404) + Profile My Clubs unified (admin + member clubs with role tag) |
+| 15a | Resend integration + application result email (wired into `publish_recruitment_results`) |
+| 15b | Admin role assignment email + welcome email (wired into `add_club_admin` + `set_super_admin` + `completeProfile`) |
+| 15c | Email verification flow fix + `/auth/verify-email` landing page with cross-tab poller + `/auth/verified` ack page |
+| 15d | Forgot-password flow: `/auth/forgot-password` + `/auth/reset-password` (two-mode: recovery-link vs signed-in change) + "Change password" affordance on `/profile` |
+| 15e | Email domain allowlist + Gmail canonicalization (strips `+tag` + dots, normalizes `googlemail.com` → `gmail.com`) |
 
 ### Left
 
 | Step | Description |
 |---|---|
-| **15** | Resend email notifications (application result, admin assigned, welcome). 3 sub-steps. |
-| **16** | Year-restricted positions + per-position custom questions + WhatsApp link reveals (originally numbered 11) |
+| **16a** | 🚧 Drive schema + admin drive management: draft support, target years, per-drive questions, list view with year filter, drive editor (create/edit/publish/delete) |
+| **16b** | Public apply flow with eligibility gate (client hide/gray + server reject) + multiple drives per club |
+| **16c** | WhatsApp reveals: interview link at REVIEW to non-withdrawn applicants; community link at RESULT to accepted members |
+| **16d?** | Dedicated step: remove `clubs.is_recruiting`, compute dynamically from drive phases, refactor consumers |
 | **17** | TBD candidates: event RSVP/attendance, recruitment workflow improvements (interview slots), member badges |
 | **18** | Post-deploy P0/P1 security fixes (profile-search filter injection, signout GET→POST, signup flow, email verification landing) |
 | **19** | UI/UX pass (Radix Dialog migration, `loading.tsx` segments, lightbox a11y, mobile redesigns, `window.location.reload()` migration, accent color decision) |
@@ -372,27 +406,36 @@ For archived clubs: sysadmin can still access all sub-pages (sees existing "deco
 
 ---
 
-## Step 16 — design locked (was step 11)
+## Step 16 — design locked (final)
 
-**Per-position with year eligibility.** Schema sketch:
+**Drives are the unit.** No positions, no umbrella table. A club can run multiple drives simultaneously. Yearly grouping is UI-only (filter tab on admin drives list).
 
-```sql
-recruitment_positions (
-  id, recruitment_id FK, title, openings_count int,
-  eligibility_min_year int, eligibility_max_year int,
-  created_at
-)
+Each drive has:
+- Name + description
+- Target years (`int[]`, non-empty subset of `{1,2,3,4}`)
+- Deadline + result date
+- Own question set (`drive_questions` table, cascades on drive delete)
+- Draft state (`published_at is null` = draft, non-null = live)
 
-position_questions (
-  id, position_id FK, prompt text, sort_order int, required bool
-)
+Lifecycle: DRAFT → OPEN (on publish) → REVIEW (on deadline passes) → RESULT (on lead publish results).
 
-applications.position_id uuid FK references recruitment_positions(id)
-  -- nullable; in step 16 we'll backfill existing apps to an implicit
-  -- "Volunteer" position per recruitment, then make NOT NULL
-```
+WhatsApp reveals:
+- **Interview link** (`recruitments.interview_whatsapp_link`) — revealed at REVIEW to non-withdrawn applicants
+- **Community link** (`clubs.community_whatsapp_link`) — revealed at RESULT to accepted members
 
-UI: club has multiple positions per recruitment, each with year eligibility + custom question set. Student sees only eligible positions. Admin reviews grouped by position. Interview WhatsApp link revealed at deadline; community WhatsApp link revealed at publish (data already collected in 9f-2).
+Split into 3 sub-steps + a dedicated cleanup step:
+- **16A** — Schema + admin drive management + draft support (schema + RPCs shipped in round 1; code in round 2)
+- **16B** — Public apply flow: eligibility gate (client hide/gray + server reject), dynamic questions per drive, multiple drives per club
+- **16C** — WhatsApp reveals (interview at Review; community at Result)
+- **16D?** — Dedicated future step: remove `clubs.is_recruiting`, compute dynamically from drive phases, refactor ~10 consumer files
+
+**Scope explicitly dropped from v1:**
+- Waitlist status (Accept/Reject only)
+- Question snapshots per submission (edits during Open warn admin; edits during Review blocked at the RPC)
+- Interview link via Google Meet (WhatsApp only)
+- Question types beyond `short_text` / `long_text`
+
+**Coexistence risk during 16A/16B:** `clubs.is_recruiting` and drive phases can disagree — a club could be `is_recruiting=false` while having an open drive. Admin UI surfaces a warning. Resolved by 16D.
 
 ---
 
@@ -454,6 +497,17 @@ UI: club has multiple positions per recruitment, each with year eligibility + cu
 23. **Never silently default RPC errors to empty arrays.** The pattern `const rows = (res.data ?? []) as Row[]` treats query errors identically to empty results. A real failure (RLS denial, type mismatch, syntax error) becomes a silent empty table in the UI. Always inspect `.error` and log/surface it. At minimum: `if (res.error) console.error("rpc X failed:", res.error)`. Without this, debugging requires guesswork — the bug in 14b storage was invisible until logs were added. *(Same incident — sum()/numeric mismatch hidden behind silent error swallowing.)*
 
 24. **Before writing any "REPLACE" file, search project knowledge for the actual current contents.** Pattern-matching from memory drops details (the exact `useActionState` + `useFormStatus` pattern, sub-components defined inline, exact prop signatures of shared components, real function names like `protect_last_lead` vs guessed `prevent_last_lead_removal`). Cost of search: one tool call. Cost of reconstruction-from-memory: regression bugs or wrong identifiers in SQL/code. When a change to an existing file is small and the file has unrelated content, prefer a focused PATCH over full REPLACE — it's safer and reads as more honest about what's actually being changed. *(14d archived-club-row.tsx reconstruction; 14d wrong trigger function name; 14f initial REPLACE-with-placeholder near-miss.)*
+
+25. **Two-tab auth flows: architecture patterns.** When building email round-trip auth flows (verification, password reset, magic link), four architecture decisions recur:
+    (a) **Cross-tab session detection.** `@supabase/ssr` browser client caches session in memory at init and does NOT auto-re-read cookies. Any polling for another tab's session update needs explicit `refreshSession()` before every `getUser()`. Add `focus` + `visibilitychange` listeners for the dominant real-world path (user switches back to Tab A after clicking link in Tab B). *(15c Rounds 1-2.)*
+    (b) **PKCE origin binding.** The `code_verifier` cookie is bound to the origin where signup happened. Sign up on `localhost:3000` + click a link that redirects to production → silent failure. Supabase's Redirect URLs allowlist must include every origin you test from. Missing origins cause fallback to Site URL with no visible error. *(15c Round 3.)*
+    (c) **Two-tab direction depends on which tab has real work.** Passive flow (verification): Tab B → static "close this tab" ack page; Tab A navigates to destination. Active flow (password reset — user types new password): Tab B → the form; Tab A is passive. Pick direction by identifying where the user's real interaction happens. *(15c Round 5 + 15d design.)*
+    (d) **Encode mode in URL at entry-point action.** For a page serving two modes (recovery-session reset vs signed-in change), pass `?recovery=1` from the initiating action, don't detect session shape server-side. URL encoding is testable, debuggable, and can't be silently miscategorized. *(15d Round 2.)*
+
+26. **Auth implementation gotchas.** Three implementation-level surprises that don't fail at typecheck but bite at runtime:
+    (a) **Effect race with cleanup + stale closure.** A `useEffect` that sets state AND has cleanup which mutates a captured variable used by `setTimeout` creates a stale-closure race: setState → deps changed → cleanup fires → variable flipped → the pending setTimeout reads the flipped value from its stale closure and skips its action. Fix: split into a worker effect (empty deps + `useRef` for internal state) + a reaction effect (state deps for the reaction). Related to Lesson 21 (infinite loop from unstable callbacks); different failure mode — silent skip, not loop. *(15c Round 6.)*
+    (b) **`require_current_password_when_updating` requires the reauthenticate flow.** The setting is not satisfied by calling `signInWithPassword` before `updateUser({ password })` in the same server action. Either implement `supabase.auth.reauthenticate()` + `updateUser({ password, nonce })`, or disable the setting and rely on your own current-password verification. *(15d Round 3.)*
+    (c) **Shared password visibility state is a UX bug.** Multiple password inputs bound to the same `type={show ? "text" : "password"}` all reveal together when one is toggled. Extract a `PasswordField` sub-component that owns its own visibility. *(15d Round 4.)*
 
 ### File-shipping conventions
 
