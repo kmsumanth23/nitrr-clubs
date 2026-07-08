@@ -79,10 +79,5 @@ function ordinal(n: number): string {
   return "th";
 }
 
-/** Human-friendly label used elsewhere (list rows, mockup card, etc). */
-export function targetYearsLabel(years: number[]): string {
-  if (!years || years.length === 0) return "No years";
-  if (years.length === 4) return "All years";
-  const sorted = [...years].sort((a, b) => a - b);
-  return "Year " + sorted.join(", ");
-}
+// Note: `targetYearsLabel` moved to `lib/drive-format.ts` so Server
+// Components can import it. This file stays "use client" for the picker.

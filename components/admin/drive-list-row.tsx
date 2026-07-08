@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { IconUsers, IconCalendar } from "@tabler/icons-react";
 import { PHASE_BADGE, phaseLabel } from "@/lib/phase";
-import { targetYearsLabel } from "@/components/admin/target-years-picker";
+import { targetYearsLabel } from "@/lib/drive-format";
 import type { DriveListItem } from "@/lib/queries/admin-drives";
 
 /** One row in the drive list on /admin/clubs/[slug]/recruitment.

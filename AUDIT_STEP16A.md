@@ -367,3 +367,200 @@ Ready for Batch 3b — the page rewrites:
 - `app/(admin)/admin/clubs/[slug]/recruitment/new/page.tsx` — NEW
 - `app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx` — NEW
 - Removal or repurposing of `components/admin/recruitment-section.tsx`
+
+---
+
+# 16A Round 2 Batch 3b — Drive editor form + pages + legacy cleanup (Shipped)
+
+Final batch of Round 2. The user-facing admin experience for drive management is now end-to-end. Legacy `RecruitmentSection` + `StartNewRecruitmentButton` UI removed. Typecheck clean at every intermediate step + final.
+
+## What shipped
+
+### Additions
+
+| Change | File | Notes |
+|---|---|---|
+| NEW | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | ~500 lines. Handles both `mode="create"` and `mode="edit"`. Uses `TargetYearsPicker` + `QuestionBuilder` from Batch 3a. Bottom action row is phase-aware: draft shows [Save draft] [Publish] [Delete]; open shows [Save] [Delete] (delete gated on `applicant_count === 0`); review/result disables everything. Soft-validation warnings (past deadline, result-before-deadline, junior-lead naming) render inline as clay-coloured notes. |
+| NEW | [app/(admin)/admin/clubs/[slug]/recruitment/new/page.tsx](app/(admin)/admin/clubs/[slug]/recruitment/new/page.tsx) | Route target for the "+ New drive" button. Gates on `getEditableClub(slug)`. Renders `<DriveEditorForm mode="create">`. |
+| NEW | [app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx](app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx) | Edit page. Gates on `getEditableClub(slug)`, then `getDriveWithQuestions(driveId)`, then a defensive `drive.club_id === editable.club.id` check. All three `notFound()` on miss. |
+
+### Replacement
+
+| Change | File | Before → After |
+|---|---|---|
+| REPLACE | [app/(admin)/admin/clubs/[slug]/recruitment/page.tsx](app/(admin)/admin/clubs/[slug]/recruitment/page.tsx) | Was single-recruitment editor via `<RecruitmentSection>`. Now a drive list via `listDrivesForClub(club.id)` + `<DriveListRow>` per row + "+ New drive" button in the header + empty-state card when no drives exist. Route URL unchanged (`/admin/clubs/[slug]/recruitment`) — old bookmarks land on the new UI naturally. |
+
+### Deletions
+
+| Change | File | Verification |
+|---|---|---|
+| DELETE | `components/admin/recruitment-section.tsx` | Pre-delete grep found 2 hits: (1) the file itself, (2) a documentation comment inside the new `recruitment/page.tsx` referencing `<RecruitmentSection>` as pre-16A history. No functional imports. Deleted; typecheck stayed clean. |
+| DELETE | `components/admin/start-new-recruitment-button.tsx` | Pre-delete grep found 1 hit: the file itself. Only consumer was the now-deleted `recruitment-section.tsx`. Deleted; typecheck stayed clean. |
+
+## Dead-code remaining (intentional per SETUP)
+
+After Batch 3b, three legacy artifacts still exist but have zero live consumers. All are queued for a future maintenance sweep (likely 16D, the dedicated `clubs.is_recruiting` removal step):
+
+| File / Symbol | Live consumers after Batch 3b |
+|---|---|
+| `lib/actions/club.ts` → `updateRecruitment` | None (grep: 1 hit — the definition itself). Was called only from the deleted `RecruitmentSection`. |
+| `lib/actions/recruitment.ts` → `startNewRecruitment` | None (grep: 1 hit — the definition itself). Was called only from the deleted `StartNewRecruitmentButton`. Plus 1 comment reference in `lib/actions/drive.ts:60` pointing at it as the sibling with the same `as never` cast pattern. |
+| `lib/actions/club.ts` → `updateClub` (back-compat shim of `updateClubContent`) | Unchanged status — was already dead code before 16A. |
+
+Leaving these in matches the SETUP's explicit "safe to leave" instruction. Removal in a coherent sweep is safer than piecemeal deletion mid-step.
+
+## Coexistence window from Batch 2 — now closed
+
+The Batch 2 audit flagged that `updateRecruitment` (legacy) and `updateDrive` (new) could both edit an open recruitment via different code paths, creating a cross-tab write-race risk. With `RecruitmentSection` deleted, `updateRecruitment` has no UI caller — the coexistence window is closed. Only `updateDrive` reaches the RPC in production paths.
+
+## Verification
+
+**Typecheck runs (all clean):**
+1. After 4 file drops, before deletions — pass
+2. After `recruitment-section.tsx` deletion — pass
+3. After `start-new-recruitment-button.tsx` deletion — pass
+
+**Pre-deletion imports audit:**
+- `grep -rn "RecruitmentSection"` → 2 hits (file + doc comment only)
+- `grep -rn "StartNewRecruitmentButton"` → 1 hit (file only)
+
+**Post-batch dead-action audit:**
+```
+lib/actions/drive.ts:60:  // type — same pattern used by startNewRecruitment in recruitment.ts.
+lib/actions/club.ts:92:export async function updateRecruitment(
+lib/actions/recruitment.ts:20:export async function startNewRecruitment(
+```
+Only definitions + one comment reference remain.
+
+## Smoke test (user-runnable end-to-end)
+
+Full 16A E2E — this is the first batch where the entire admin flow is usable through the UI.
+
+**A. Drive creation → question CRUD → publish → post-publish edit → draft delete** — the full test path from `SETUP_STEP16A_ROUND2_BATCH3B.md` sections A-E is now runnable in the browser. Batch 1's "Test Draft 16A Batch 1" row from the raw INSERT is still in the DB (created outside the RPC) — safe to leave; will show in the drive list with `applicant_count: 0`.
+
+**B. Legacy path safety** — visiting `/admin/clubs/shaurya/recruitment` renders the new drive list. Old URL, new UI.
+
+## What 16A did NOT touch (16B / 16C / 16D queue)
+
+- **Public apply flow** — students still see only the current published recruitment via the Batch-1-filtered queries. Multi-drive public flow is 16B.
+- **`clubs.is_recruiting`** — still stored + admin-toggled from the club edit page. Removal is a dedicated future step.
+- **No filter tabs on drive list** — flat list only. Adding All/Open/Review/Result/Draft tabs is a small follow-up once drives accumulate.
+- **No per-drive pending-count** — `DriveListItem.applicant_count` is total-applications. 16B adds pending counts.
+- **WhatsApp reveals** — interview at Review + community at Result — 16C.
+
+## Round 2 summary
+
+Across Batch 1 (foundation), Batch 2 (drive backend + audit), Batch 3a (building-block components), and Batch 3b (form + pages + cleanup), 16A shipped:
+
+- **1 SQL schema migration + 1 SQL RPC migration** (Round 1, run by user via Supabase)
+- **7 CLAUDE.md edits** documenting the design + lessons
+- **3 new query files** (`admin-drives.ts`) + 1 replaced (`phase.ts`)
+- **3 new validation + action files** (`drive.ts` × 2, updated audit metadata)
+- **4 new components + 1 replaced + 2 deleted** (drive-editor-form + list-row + question-builder + question-editor-row + target-years-picker; recruitment-section + start-new-recruitment-button removed)
+- **4 new pages + 1 replaced** (`recruitment/page.tsx` + `new/` + `[driveId]/` + supporting audit pill in `audit-log-view`)
+- **~15 draft-filter defensive patches** on legacy "most-recent recruitment" queries across `lib/queries/`, `lib/actions/`, and `app/(student)/`
+- **~5 phase-consumer patches** (draft banner + defensive null-returns + reject-draft in admin-application)
+- **2 caught-and-fixed type bugs** (RPC-type mismatch on `create_drive`/`update_drive`; `DriveResult` shape convention mismatch)
+- **3 dead-code artifacts** left in place for a future maintenance sweep
+
+Ready for Sumanth's smoke test on Batch 3b. Once that clears, 16A is complete and 16B is the next step.
+
+---
+
+# 16A Batch 3b — Post-landing fixes (Shipped)
+
+Three follow-up rounds after Batch 3b landed, driven by user smoke testing. Each is a targeted fix, not new scope.
+
+## Round 1 — Server/Client boundary bug on `targetYearsLabel`
+
+**Symptom:** `/admin/clubs/[slug]/recruitment` returned 500 with:
+```
+Error: Attempted to call targetYearsLabel() from the server but targetYearsLabel is on the client.
+```
+
+**Root cause:** `targetYearsLabel` — a pure formatting helper — was exported from `components/admin/target-years-picker.tsx`, which is `"use client"`. Next.js flags any file with `"use client"` as a client module; every export becomes a client-only reference. Server Components (like `DriveListRow` inside the server-rendered recruitment page) can only pass client-module exports as props to other Client Components, not call them during render.
+
+**Fix:**
+- **NEW** [lib/drive-format.ts](lib/drive-format.ts) — plain module (no `"use client"`), exports `targetYearsLabel`.
+- **PATCH** [components/admin/target-years-picker.tsx](components/admin/target-years-picker.tsx) — removed the local export, added a one-line breadcrumb comment pointing at the new location.
+- **PATCH** [components/admin/drive-list-row.tsx](components/admin/drive-list-row.tsx) — import path swapped from `@/components/admin/target-years-picker` to `@/lib/drive-format`.
+
+**Post-fix Turbopack cache issue:** the source fix landed but the dev server kept serving stale compiled chunks — stack trace still pointed at `target-years-picker.tsx` after the edit. Resolved by `rm -rf .next` and `npm run dev` restart. Matches CLAUDE.md's dev-recipe note ("Clear `.next` after migrations"); every file rename / export move triggers the same class of Turbopack cache-miss.
+
+**Lesson worth banking:** pure helpers should live in plain `lib/` modules, not co-located inside `"use client"` components. Reserved for `lib/format-*.ts` / `lib/*-format.ts` patterns going forward.
+
+## Round 2 — UX rewrite of the drive editor bottom actions
+
+**Symptoms (three, one round):**
+1. Create page had only a "Save as Draft" button — user wanted Save Draft AND Publish side by side.
+2. Edit page — Save changes (Section 1) and Publish (Section 3) were in visually separate sections.
+3. Confusion about "Save changes" only persisting top-level fields while questions auto-save (per Batch 3a design).
+
+**Design decision worth logging:** keep the split between top-level Save and per-row question auto-save. Rationale: batching question edits into a single Save would require tracking a per-question delta since load + reconciling partial-failure states (e.g. metadata saved, one question failed). Per-row auto-save is simpler + preserves immediate feedback. Made the split explicit via UI hints instead of erasing it.
+
+**Fix:**
+- **PATCH** [lib/actions/drive.ts](lib/actions/drive.ts) — extended `createDrive` to read a `publishAfter` form field. When `"true"`, action creates the drive then immediately calls `publish_drive` on the new id. If publish fails (e.g. missing deadline), the drive still exists as a draft; user retries from the editor.
+- **REWRITE** [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx):
+  - Form now wraps only Section 1 (drive fields). Bottom action bar sits outside the form and uses HTML5 `form="drive-form"` association so buttons still trigger the correct submit.
+  - Removed the standalone "Section 3: Go live" block. Publish button moved into the bottom action bar.
+  - New sticky bottom action bar (`sticky bottom-4`) with mode-aware buttons:
+
+    | Mode / Phase | Buttons |
+    |---|---|
+    | Create | `[Save as Draft]` + `[Save & Publish]` (submit buttons with `name="publishAfter" value="false"` / `"true"`) |
+    | Edit / draft | `[Save changes]` + `[Publish drive]` (Publish opens confirm modal) |
+    | Edit / open | `[Save changes]` only |
+    | Edit / review or result | Bottom bar hidden entirely (read-only) |
+
+  - `[Save & Publish]` is disabled unless name + target years + deadline are all filled (client-side gate mirroring RPC-side check).
+  - `[Publish drive]` on edit/draft is disabled if drive is dirty ("Save your changes first" tooltip) or missing any publish requirement.
+  - `PublishConfirmModal` extracted as its own component; still confirms before the irreversible action.
+  - Danger zone kept as a separate section (delete is a different mental model from save/publish).
+  - `useFormStatus` replaced with `useActionState`'s `isPending` — cleaner since buttons now live outside the form element.
+  - Added clarity hints: "3 default questions will be added automatically…" on create page; "Questions save automatically as you edit…" on edit page questions section.
+
+## Round 3 — Dirty-stuck race + datetime timezone shift
+
+**Symptoms:**
+1. "Unsaved drive changes" indicator sometimes stuck after successful save (when rapidly editing + saving).
+2. On page reload after saving a deadline, the deadline value shifted forward by one day.
+3. Browser's `beforeunload` popup fired even after successful save.
+
+**Root cause 1 (stuck dirty):** old code cleared dirty via `useEffect(() => { if (state.ok) setDirty(false) }, [state.ok])`. Effect only fires on false→true transition; if `state.ok` was already `true` from a prior save, subsequent successful saves left the dep unchanged and the effect never re-fired. Only the FIRST successful save ever cleared the flag.
+
+**Root cause 2 (timezone shift):** `<input type="datetime-local" name="deadline">` submits its value as `YYYY-MM-DDTHH:mm` with no timezone marker. Postgres reads that as UTC (session default). User in IST (UTC+5:30) typing `23:00` local → stored as `23:00 UTC` → reloaded as local `2026-07-16T04:30` (next-day drift). Roundtrip mismatch by 5-6 hours ≈ a day for any evening time.
+
+**Root cause 3 (reload popup):** `useUnsavedChanges` triggers `beforeunload` when `dirty` is true. Downstream of stuck-dirty from cause #1.
+
+**Fix:**
+- **PATCH** [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx):
+  - Replaced the state.ok effect with an `isPending`-transition ref:
+    ```tsx
+    const wasPendingRef = React.useRef(false);
+    React.useEffect(() => {
+      if (wasPendingRef.current && !isPending && state.ok && !state.error) {
+        setDirty(false);
+      }
+      wasPendingRef.current = isPending;
+    });
+    ```
+    Fires on every completed save (deps-less runs every render + explicit transition check). `!state.error` guard leaves dirty true when a save fails so the user notices.
+  - Split each datetime input into two elements: visible `type="datetime-local"` (state-driven, no `name`) + hidden `<input name="..." value={new Date(state).toISOString()}>`. The ISO conversion happens on the client where `new Date("...")` correctly interprets the naive local-time string using the browser's timezone.
+
+**Lesson worth banking:**
+- **`useActionState`'s `state` is sticky across dispatches for identical shapes.** If your effect needs to fire on every completed submit, watch `isPending` transitions, not `state.ok`.
+- **`<input type="datetime-local">` submits timezone-less strings.** Anywhere this input feeds into a `timestamptz` column, either normalize client-side to ISO before submission or normalize server-side using the session's known timezone. Naive server-side `new Date(value).toISOString()` is wrong because Node's local time is usually UTC on serverless.
+
+---
+
+## Files touched across the three post-landing rounds
+
+| Change | File | Round |
+|---|---|---|
+| NEW | [lib/drive-format.ts](lib/drive-format.ts) | 1 |
+| PATCH | [components/admin/target-years-picker.tsx](components/admin/target-years-picker.tsx) | 1 |
+| PATCH | [components/admin/drive-list-row.tsx](components/admin/drive-list-row.tsx) | 1 |
+| PATCH | [lib/actions/drive.ts](lib/actions/drive.ts) — `createDrive` publishAfter handling | 2 |
+| REWRITE | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) — bottom action bar + hidden-input ISO normalization + isPending-transition dirty clear | 2 + 3 |
+
+Typecheck stayed clean at each round. No SQL, no schema, no queries touched — all client-side and one server-action extension.

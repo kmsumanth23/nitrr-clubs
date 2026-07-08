@@ -72,6 +72,21 @@ export async function createDrive(
   }
 
   const newDriveId = data as unknown as string;
+
+  // Optional publish-after-create for the "Save & Publish" button on the
+  // create page. If publish fails (e.g. missing deadline), we still land on
+  // the editor with the drive intact — user can retry there.
+  const publishAfter = formData.get("publishAfter") === "true";
+  if (publishAfter) {
+    const { error: pubErr } = await supabase.rpc("publish_drive", {
+      drive_id_in: newDriveId,
+    });
+    if (pubErr) {
+      console.error("createDrive publish-after-create failed:", pubErr);
+      // Fall through to editor redirect — drive was created successfully.
+    }
+  }
+
   revalidateDrive(clubSlug, newDriveId);
 
   // Send admin to the editor for the new drive
