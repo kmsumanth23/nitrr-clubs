@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getPhase, type Phase } from "@/lib/phase";
 import type {
   Application,
   Profile,
@@ -147,4 +148,126 @@ export async function getApplicationHistoryForClub(
       counts: counts as Record<ApplicationStatus | "all", number>,
     };
   });
+}
+
+// =========================================================================
+// 16B — Per-drive applications fetch
+// =========================================================================
+
+export interface DriveQuestionForReview {
+  id: string;
+  prompt: string;
+  question_type: "short_text" | "long_text";
+  sort_order: number;
+  required: boolean;
+}
+
+export interface DriveForReview {
+  id: string;
+  name: string | null;
+  description: string | null;
+  target_years: number[];
+  deadline: string | null;
+  result_date: string | null;
+  published_at: string | null;
+  results_published_at: string | null;
+  created_at: string;
+  phase: Phase;
+  questions: DriveQuestionForReview[];
+}
+
+/** Per-drive applications page: drive metadata + its questions (so response
+ *  keys can be rendered against prompts) + all applications for the drive.
+ *
+ *  Returns null when the drive doesn't exist or is a draft (drafts have
+ *  no applications anyway; the caller uses null to redirect). */
+export async function getApplicationsForDrive(
+  driveId: string,
+): Promise<{
+  drive: DriveForReview;
+  applications: AdminApplication[];
+  counts: Record<ApplicationStatus | "all", number>;
+} | null> {
+  const supabase = await createClient();
+
+  const { data: driveRow, error: driveErr } = await supabase
+    .from("recruitments")
+    .select(
+      `id, name, description, target_years, deadline, result_date,
+       published_at, results_published_at, created_at,
+       drive_questions(id, prompt, question_type, sort_order, required)`,
+    )
+    .eq("id", driveId)
+    .not("published_at", "is", null)
+    .order("sort_order", {
+      referencedTable: "drive_questions",
+      ascending: true,
+    })
+    .maybeSingle();
+
+  if (driveErr) {
+    console.error("getApplicationsForDrive drive fetch failed:", driveErr);
+    return null;
+  }
+  if (!driveRow) return null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = driveRow as any;
+  const phase = getPhase({
+    deadline: r.deadline,
+    result_date: r.result_date,
+    published_at: r.published_at,
+    results_published_at: r.results_published_at,
+  });
+  if (!phase || phase === "draft") return null;
+
+  const drive: DriveForReview = {
+    id: r.id,
+    name: r.name,
+    description: r.description ?? null,
+    target_years: r.target_years ?? [1, 2, 3, 4],
+    deadline: r.deadline,
+    result_date: r.result_date,
+    published_at: r.published_at,
+    results_published_at: r.results_published_at,
+    created_at: r.created_at,
+    phase,
+    questions: (r.drive_questions ?? []).map(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (q: any): DriveQuestionForReview => ({
+        id: q.id,
+        prompt: q.prompt,
+        question_type: q.question_type,
+        sort_order: q.sort_order,
+        required: q.required,
+      }),
+    ),
+  };
+
+  const { data: appsData, error: appsErr } = await supabase
+    .from("applications")
+    .select(
+      `*,
+       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch),
+       note_author:profiles!applications_note_by_fkey(full_name)`,
+    )
+    .eq("recruitment_id", driveId)
+    .order("created_at", { ascending: false });
+  if (appsErr) throw appsErr;
+
+  const applications = (appsData ?? []) as AdminApplication[];
+
+  const counts: Record<string, number> = {
+    all: applications.length,
+    pending: 0, reviewing: 0, accepted: 0,
+    rejected: 0, withdrawn: 0, removed: 0,
+  };
+  for (const a of applications)
+    counts[a.status] = (counts[a.status] ?? 0) + 1;
+
+  return {
+    drive,
+    applications,
+    counts: counts as Record<ApplicationStatus | "all", number>,
+  };
 }

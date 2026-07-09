@@ -14,6 +14,10 @@ export interface DriveListItem {
   created_at: string;
   phase: Phase;
   applicant_count: number;
+  /** 16B: applications in `pending` or `reviewing` status. Used by the
+   *  admin recruitment list to show "N pending" pill on Open/Review
+   *  drives. Batch 1 populates this; Batch 2 surfaces it in the UI. */
+  pending_count: number;
 }
 
 /** Drive detail with its questions attached, for the drive editor page. */
@@ -41,7 +45,11 @@ export interface DriveQuestion {
 }
 
 /** List all drives for a club (draft + open + review + result), newest first.
- *  Applicant count computed via Supabase embedded-resource count. */
+ *  Applicant count computed via Supabase embedded-resource count.
+ *
+ *  Pending count is a separate grouped-by query since Supabase's embedded
+ *  count doesn't support filtered aggregates on the same relation. Cheap:
+ *  one round-trip on top of the main fetch. */
 export async function listDrivesForClub(
   clubId: string,
 ): Promise<DriveListItem[]> {
@@ -62,7 +70,28 @@ export async function listDrivesForClub(
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return ((data ?? []) as any[]).map((r) => {
+  const rows = (data ?? []) as any[];
+  if (rows.length === 0) return [];
+
+  // 16B: pending counts grouped by recruitment_id. Second query; cheap.
+  const driveIds = rows.map((r) => r.id);
+  const { data: pendingRows } = await supabase
+    .from("applications")
+    .select("recruitment_id, status")
+    .in("recruitment_id", driveIds)
+    .in("status", ["pending", "reviewing"]);
+  const pendingByDrive = new Map<string, number>();
+  for (const row of (pendingRows ?? []) as Array<{
+    recruitment_id: string;
+    status: string;
+  }>) {
+    pendingByDrive.set(
+      row.recruitment_id,
+      (pendingByDrive.get(row.recruitment_id) ?? 0) + 1,
+    );
+  }
+
+  return rows.map((r) => {
     const phase = getPhase({
       deadline: r.deadline,
       result_date: r.result_date,
@@ -81,6 +110,7 @@ export async function listDrivesForClub(
       created_at: r.created_at,
       phase,
       applicant_count: r.applications?.[0]?.count ?? 0,
+      pending_count: pendingByDrive.get(r.id) ?? 0,
     } satisfies DriveListItem;
   });
 }

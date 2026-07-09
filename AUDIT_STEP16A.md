@@ -564,3 +564,215 @@ Error: Attempted to call targetYearsLabel() from the server but targetYearsLabel
 | REWRITE | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) — bottom action bar + hidden-input ISO normalization + isPending-transition dirty clear | 2 + 3 |
 
 Typecheck stayed clean at each round. No SQL, no schema, no queries touched — all client-side and one server-action extension.
+
+16B — Planning
+Goal
+Public apply flow refactored for multi-drive per club, with eligibility gates + dynamic questions. Students see drives filtered by their year, apply to one drive with its custom questions, admins review each drive independently.
+Current state (post-16A)
+
+Public apply page (/clubs/[slug]/apply) still uses the pre-16A "most recent published recruitment" pattern (Batch 1's draft filter keeps this correct for now)
+Apply action still uses hardcoded motivation / experience / contribution fields (from lib/validation/application.ts)
+Admin applications page shows all apps for the current recruitment (single drive)
+/profile shows applications without drive-level context
+
+Scope of 16B
+Public side
+
+Club detail page — surface "Open drives" section when any drive is in Open phase, listing all open drives with name + target years + apply CTA
+New drive-specific apply page — either /clubs/[slug]/apply/[driveId] OR keep /clubs/[slug]/apply with a drive picker; leaning [driveId] route for cleaner state + shareable URLs
+Dynamic question form — reads drive_questions and renders inputs per question (short_text vs long_text vs required)
+Eligibility gate — student's year must be in drive.target_years; ineligible drives are shown but grayed with reason ("For 3rd-year students only")
+Student profile applications view — show drive name + target years per application
+
+Admin side
+
+Applications page rework — shows apps grouped/filtered by drive (or drive picker at top); response rendering joins with drive_questions for prompt display
+Per-drive pending count on DriveListItem — populate the count so DriveListRow shows real numbers
+
+Server side
+
+Rework submitApplication action to accept driveId + validate year eligibility server-side + parse dynamic responses against drive_questions
+Update applications.responses jsonb shape: keyed by question_id instead of hardcoded field names
+Backfill existing responses from {motivation, experience, contribution} → keyed by the corresponding auto-populated question ids
+
+Sub-step split
+Two sub-batches, mirroring how 16A worked:
+16B Batch 1 — Server + queries + validation
+
+Schema/data: backfill existing applications.responses to be keyed by drive_question ids (one-time migration)
+lib/queries/apply.ts new — getOpenDrivesForClub(clubId, studentYear) + getDriveForApply(driveId, studentId) (returns drive + questions + eligibility state + existing application if any)
+lib/queries/admin-drives.ts update — add pending_count to DriveListItem
+lib/queries/admin-applications.ts update — add getApplicationsForDrive(driveId) fetching apps with responses joined against drive_questions for prompts
+lib/validation/application.ts rewrite — dynamic Zod schema built from a drive's questions
+lib/actions/application.ts rewrite — accept driveId, validate eligibility, validate against dynamic questions
+Draft filter still applies to student-facing queries
+
+~8 files. Migration is the risky part.
+16B Batch 2 — Public + admin UI
+
+Public /clubs/[slug] — add "Open drives" section
+Public /clubs/[slug]/apply/[driveId] — new route + page + dynamic question form
+Redirect /clubs/[slug]/apply (old URL) → drive picker or first open drive (backward compat)
+Admin /admin/clubs/[slug]/applications — drive picker + response rendering with question prompts
+/profile applications section — show drive context
+DriveListRow — surface real pending count
+
+~10 files.
+Design decisions I need your call on
+Six decisions. Answer with defaults if you agree, or push back.
+1. Apply URL structure. Options:
+
+A — /clubs/[slug]/apply/[driveId] (new nested route)
+B — /clubs/[slug]/apply with ?drive=X query param
+C — /clubs/[slug]/apply with a drive picker on-page
+
+My pull: A. Shareable, bookmarkable, cleanest URL semantics. Old /clubs/[slug]/apply becomes either a redirect to the first open drive OR shows a picker if multiple. Let me know which fallback you want.
+2. Responses JSONB shape. Old: {motivation: "...", experience: "...", contribution: "..."}. New: {"[question_uuid]": "..."}.
+The backfill: existing recruitments got auto-populated with 3 questions in Round 1. Existing applications' responses map to those 3 questions by name (Why join / Experience / Contribute → in that sort_order). Migration finds the sort_order 0/1/2 question ids per recruitment and rekeys the JSONB.
+My pull: do the backfill. Alternative (dual-read: old shape + new shape) is fragile and adds branching in every response reader. One-shot migration is cleaner.
+3. Eligibility mismatch UX. Student's year is 2, drive targets years [3,4]. Options:
+
+A — Drive card shown but grayed with "For 3rd & 4th year students only"; no Apply button
+B — Drive card hidden entirely
+C — Card shown, Apply button shown but blocked on submit with error
+
+My pull: A — matches the 16B plan we agreed on ("greyed with eligibility message"). Educates the student without pretending options don't exist.
+4. Multiple open drives — can a student apply to more than one? Your model doc says "one application per drive" but doesn't clarify cross-drive. Options:
+
+A — Yes, student can apply to multiple concurrent drives (e.g., Technical Team AND Design Team)
+B — No, one active application per club at a time
+
+My pull: A. Matches "drives are independent" from your model. If Shaurya runs Technical + Design drives, a student can genuinely be interested in both. No structural reason to block.
+5. applications.recruitment_id — keep or replace with drive_id?
+The column IS the drive id. No rename needed. Just noting.
+6. Response backfill: what if an existing application has data that doesn't map cleanly?
+The 3 auto-populated questions might not match what an existing application's responses contain if a club had modified them pre-16A (which they couldn't, but defensively). My pull: abort migration if any application row has response keys other than the expected 3. Clean fail is better than silent data loss. If we're safe (nothing was editable pre-16A), migration proceeds; if not, we investigate.
+What's NOT in 16B
+
+clubs.is_recruiting removal — dedicated future step (16D)
+WhatsApp reveals — 16C
+Waitlist status — dropped
+Question snapshots — dropped
+Draft eligibility feedback ("you'll be eligible next year") — nice-to-have, deferring
+Multi-select / choice question types — v2
+
+answer to the questions
+
+1. A
+
+2.New only
+
+3.A and we have a vulnerability to deal with, what if a 2year  student updates his profile to a 3 or 4 th year to imporsonate.
+
+4.A
+
+5.your take
+
+
+
+6. lets drop the idea of 3 default questions let club decide what questions they need to put just like google forms, this resolves few issues which we are trying to solve. And one more thing if a club manager changes the drive questions or details when a student has already applied to the drive then those students must get a notification to update there application before deadline, there must be a soft warning also when the club managers try to change the details when >1 application present for that drive, as this will not effect any of our task now we can work on it later.
+
+and can we add this now?
+Multi-select / choice question types — v2
+
+---
+
+# 16B Batch 1 — Server-side (Shipped)
+
+Pre-req SQL migration + 5 TypeScript files. Typecheck clean. Answer-block from Planning section is now locked in.
+
+## Decisions locked from Planning
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Apply URL structure | A — `/clubs/[slug]/apply/[driveId]` nested route (Batch 2) |
+| 2 | Responses JSONB shape | New only |
+| 3 | Eligibility mismatch UX | A — greyed card with "For X-year students only" message |
+| 3-security | Year impersonation defense | Defer to dedicated post-16 step. Trust `profile.year` in Batch 1. |
+| 4 | Multiple concurrent applications per student | A — allowed |
+| 5 | `applications.recruitment_id` column name | Keep — the column IS the drive id |
+| 6a | 3 default questions | Dropped. Rewritten `create_drive` skips auto-populate. |
+| 6b | Applicant-notification on edit-after-apply | Deferred |
+| 6-migration | Old-shape responses on existing drives | Wipe all drive_questions + purge all applications (option 3 combined with option 2) |
+
+## What shipped
+
+### SQL migration (user runs manually via Supabase)
+
+| Change | File | Impact |
+|---|---|---|
+| NEW | [supabase/16b_drop_defaults.sql](supabase/16b_drop_defaults.sql) | Purges all `applications` rows (bypassing the `enforce_application_phase` trigger via GUC), wipes all `drive_questions` rows, and rewrites `create_drive` RPC to skip the 3-question auto-populate. Includes sanity-check queries at the bottom. Cascade-safe: `club_members` are unaffected (they live independently of applications post-publish). |
+
+### New TypeScript files
+
+| Change | File | Purpose |
+|---|---|---|
+| NEW | [lib/queries/apply.ts](lib/queries/apply.ts) | Student-facing queries. `getOpenDrivesForClub(clubId, studentId, studentYear)` returns Open-phase drives annotated with per-student `eligible` + `has_applied` + `application_status`. `getDriveForApply(driveId, studentId, studentYear)` returns drive metadata + questions + existing application (for re-apply / edit). Both filter drafts implicitly via `.not("published_at", "is", null)` and reject non-Open phases. |
+
+### Modified TypeScript files
+
+| Change | File | Notes |
+|---|---|---|
+| PATCH | [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | Added `pending_count: number` to `DriveListItem`. `listDrivesForClub` now runs a second query (grouped `SELECT status FROM applications WHERE recruitment_id IN (…) AND status IN ('pending','reviewing')`), maps counts to drive ids, and populates the new field. Supabase's embedded-resource count doesn't support filtered aggregates on the same relation, so a second round-trip is needed. Cheap: no per-drive N+1 — one query for all drives. |
+| PATCH | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | Added `getApplicationsForDrive(driveId)` returning `{ drive, applications, counts }`. `drive` includes the question set (for prompt lookup when rendering responses). Rejects drafts + never returns for non-existent drives. Existing `getApplicationsForClub` / `getApplicationCountsForClub` / `getApplicationHistoryForClub` unchanged — Batch 2 rewires the admin apps page to switch consumer. |
+| REWRITE | [lib/validation/application.ts](lib/validation/application.ts) | Removed the static `applicationSchema` + `{motivation, experience, contribution}` shape. New exports: `buildResponseSchema(questions)` builds a Zod object keyed by question id; `normalizeResponsesInput(raw, questions)` trims + maps empty-string to undefined so optional questions don't fail their `.optional()` guard. Length policy: `short_text` max 250, `long_text` max 2000. |
+| REWRITE | [lib/actions/application.ts](lib/actions/application.ts) | `submitApplication` now reads `driveId` + `q_<question_id>` form fields, gates on phase (`open`) + eligibility (`profile.year ∈ target_years`) + presence of ≥1 question + Zod validation against the drive's live question set. Sensible errors surfaced per gate (`"Complete your profile (add your year) before applying"`, `"This drive is only for Year N students"`, `"This drive doesn't have any questions yet"`). `editApplication` follows the same dynamic-response path. `withdrawApplication` unchanged apart from adding `published_at` to the recruitment selection so `getPhase` sees a valid draft-vs-open signal. |
+
+## Design notes
+
+- **Two-query pending-count in `listDrivesForClub`.** Supabase's `applications(count)` embedded aggregate doesn't accept `where status IN (...)`. The two-query approach avoids a per-drive N+1 and keeps the pending-count filterable at the Postgres level. Migrating to a SECURITY DEFINER RPC that returns a materialized view is possible later if this hot path stretches.
+- **Draft filter unchanged.** Every 16A draft-filter patch (from Batch 1 of Round 2) still applies. `apply.ts` queries add the same `.not("published_at", "is", null)` filter directly — drafts never leak into the public apply flow.
+- **Eligibility on `apply.ts` uses live `profile.year`.** No snapshot on application row. If the user changes their profile year later, admin views current year. This is the Round-3-planning-deferred vulnerability — logged for a dedicated defense step.
+- **`applications.recruitment_id` unchanged.** The column IS the drive id post-16A. No rename, no dual-write. Query readers use it as-is.
+- **UI consumers of the removed `motivation` / `experience` / `contribution` keys** (`components/clubs/apply-form.tsx`, `components/profile/application-row.tsx`, `components/admin/application-review-row.tsx`) — Batch 2 rewrites all three. During Batch 1 coexistence they will render `undefined` where they previously read those keys; the app builds/typechecks fine because those files declare local response types instead of importing from `validation/application.ts`. Behaviorally: existing apply-form submission would return `"Missing drive id."` since it doesn't send one — but the migration purges pre-16A applications and prevents submits against zero-question drives, so this is a coexistence window with no real user-facing regression: pre-16B applications are gone, and new ones aren't accepted until Batch 2 ships the new form.
+
+## Migration risks worth flagging
+
+1. **Data loss is deliberate.** All `applications` rows are deleted. All `drive_questions` rows are deleted. Club members are untouched. If any real production application was submitted since the 2026-06-17 deploy that you'd want to preserve, back it up before running the migration. The user-confirmed decision was "wipe" — this audit records that.
+2. **Existing published drives become question-less.** After migration, any drive currently in Open phase has zero questions until an admin adds some via the Batch-3b drive editor. `submitApplication` returns a friendly `"This drive doesn't have any questions yet — check back once the club has set them up."` in that state. Admins should be told to add questions ASAP after running the migration if any drives are currently taking applications.
+3. **`publish_drive` still requires ≥1 question.** Unchanged. New drives cannot be published until at least one question exists. This is enforced at the RPC layer, not just the UI.
+
+## Files that must change in Batch 2 (per audit plan)
+
+| File | Purpose |
+|---|---|
+| `app/(marketing)/clubs/[slug]/page.tsx` (patch) | Add "Open drives" section listing open drives with apply CTA per year eligibility |
+| `app/(student)/clubs/[slug]/apply/page.tsx` (rewrite or redirect) | Old URL → redirect to first open drive OR drive picker |
+| `app/(student)/clubs/[slug]/apply/[driveId]/page.tsx` (new) | Drive-specific apply page rendering dynamic question form |
+| `components/clubs/apply-form.tsx` (rewrite) | Dynamic question form; renders per-question inputs from `drive_questions` |
+| `app/(admin)/admin/clubs/[slug]/applications/page.tsx` (rewrite) | Drive picker at top; response rendering joins with prompts |
+| `components/admin/application-review-row.tsx` (rewrite) | Response block renders `{ [question_id]: value }` against prompt lookup |
+| `components/profile/application-row.tsx` (rewrite) | Show drive name + target years context |
+| `components/profile/applications-list.tsx` (patch if needed) | Group / label per drive |
+| `components/admin/drive-list-row.tsx` (patch) | Surface `pending_count` field |
+
+## Verification
+
+**Typecheck:** clean via `npm run typecheck`.
+
+**Migration smoke test** (user runs after `16b_drop_defaults.sql`):
+```sql
+select count(*) as applications_remaining from applications;
+-- expect: 0
+select count(*) as drive_questions_remaining from drive_questions;
+-- expect: 0
+select count(*) as drives_total from recruitments;
+-- unchanged from before
+select count(*) as club_members_untouched from club_members;
+-- unchanged
+```
+
+**Query smoke test** (post-migration):
+- `getOpenDrivesForClub(clubId, studentId, studentYear)` returns your currently-open drives with `eligible` field reflecting whether the student's year is in each drive's `target_years`
+- `getDriveForApply(driveId, ...)` returns null for draft/review/result drives; returns the drive + empty questions array for a post-migration drive with no questions added yet
+- `listDrivesForClub(clubId)` still returns all drives (draft + open + review + result); `pending_count` is 0 across the board (no applications exist)
+
+## What Batch 1 does NOT touch
+
+- Any UI file (Batch 2 owns all UI changes)
+- `clubs.is_recruiting` handling (dedicated future step, 16D)
+- Applicant notification on drive edit (deferred per Item 6b)
+- WhatsApp reveals (16C)
+- Year-impersonation defense (deferred to dedicated post-16 step)
+
+Ready for the SQL migration + typecheck confirmation. Once you say "Batch 1 clean," Batch 2 ships the UI layer.
