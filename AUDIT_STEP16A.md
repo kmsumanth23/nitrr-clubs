@@ -776,3 +776,98 @@ select count(*) as club_members_untouched from club_members;
 - Year-impersonation defense (deferred to dedicated post-16 step)
 
 Ready for the SQL migration + typecheck confirmation. Once you say "Batch 1 clean," Batch 2 ships the UI layer.
+
+---
+
+# 16B Batch 2a — Public apply flow UI (Shipped)
+
+Ships the student-facing side of the multi-drive apply flow. 4 new/replaced files, 1 patch. Typecheck clean after fixing two Batch-1 interface bugs surfaced by the file drops.
+
+## What shipped
+
+| Change | File | Notes |
+|---|---|---|
+| NEW | [components/clubs/open-drives-section.tsx](components/clubs/open-drives-section.tsx) | Server component. Fetches drives via `getOpenDrivesForClub` (Batch 1), fetches signed-in user + `profile.year` in parallel, renders one `<DriveCard>` per open drive. Hides itself if there are zero open drives. `<ActionCTA>` sub-component branches: not-signed-in → sign-in deep link; no-profile-year → complete-profile deep link; not-eligible → "Not eligible" lock badge; already-applied → "Applied" link back to the drive page; eligible → "Apply" primary button. |
+| PATCH | [app/(marketing)/clubs/[slug]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx) | Three edits: added `OpenDrivesSection` import; simplified the recruit aside card to a static "See open drives below" hint (was a conditional `is_recruiting`-gated Apply button); injected `<OpenDrivesSection>` immediately before the `{/* TEAM */}` section. The `Button` import stays — still used by the archived-club fallback deeper in the page. |
+| REWRITE | [app/(student)/clubs/[slug]/apply/page.tsx](app/(student)/clubs/[slug]/apply/page.tsx) | Landing / picker page. Auth-gate → profile-completeness gate → fetch open drives with eligibility. 0 drives → `redirect(/clubs/[slug])`; 1 drive → `redirect(/clubs/[slug]/apply/[driveId])`; 2+ → render picker page listing all drives with per-card apply / view / not-eligible affordances. |
+| NEW | [app/(student)/clubs/[slug]/apply/[driveId]/page.tsx](app/(student)/clubs/[slug]/apply/[driveId]/page.tsx) | Drive-specific apply page. Auth + profile + `getDriveForApply` + membership/admin block checks all layered in. Three empty-states via sub-components: `<BlockState>` (already member / admin), `<NotEligibleState>` (year mismatch), `<NoQuestionsState>` (zero questions — the post-16B-migration case for pre-existing published drives). Otherwise renders `<ApplyForm>` with drive metadata + questions + existing application (for edit/re-apply mode). |
+| REWRITE | [components/clubs/apply-form.tsx](components/clubs/apply-form.tsx) | Removed the fixed motivation/experience/contribution fields. Now iterates over `questions` sorted by `sort_order` and renders `<input type="text">` for `short_text` (250 char max) or `<textarea rows="4">` for `long_text` (2000 char max). Field names use `q_<question_id>` matching the action's expected format. `existingApplication` prop drives edit/re-apply copy: withdrawn → "Re-apply"; pending/reviewing → "Update application"; nothing → "Submit application". Pre-fills `defaultValue` from `existing_application.responses`. |
+
+## Bugs caught by typecheck (fixed inline)
+
+**Bug 1 — `DriveForApply` shape mismatch.** Batch 1 defined it as a flat interface (`{id, club_id, name, ...}` alongside `eligible`, `existing_application`). The `[driveId]/page.tsx` file dropped by Batch 2a expected the nested shape `{drive: {...}, eligible, existing_application}` — matches the pattern used by `getApplicationsForDrive` in `admin-applications.ts`. 9 typecheck errors surfaced.
+
+**Fix:** Refactored `DriveForApply` in [lib/queries/apply.ts](lib/queries/apply.ts) to the nested shape. Aligned with the sibling `getApplicationsForDrive` interface for consistency. The query body's return statement got wrapped in a `drive: {...}` block.
+
+**Bug 2 — `getOpenDrivesForClub`'s `studentId` was non-nullable.** But the section component's signed-out branch legitimately passes `null` (a signed-out visitor browses a club page and sees open drives without being logged in). 1 typecheck error.
+
+**Fix:** Widened the parameter type to `string | null` in [lib/queries/apply.ts](lib/queries/apply.ts). The `.find((a) => a.profile_id === studentId)` inside the query returns undefined for `null` since applications' `profile_id` is never null — so no functional change, just type-correctness.
+
+## Design decisions worth noting
+
+- **`club.is_recruiting` is no longer consulted for the apply CTA.** The old page had an `is_recruiting ? <Apply> : <ClosedMessage>` fork. New page: presence of open drives IS the recruiting signal. If a club has `is_recruiting=false` but has an open drive (data drift), drives still show. Correct per model — drive phase beats stored flag. Full column removal remains the queued 16D step.
+- **Membership/admin block moved to server-side pre-render.** The old apply form did the check on the same page but rendered blocked-state as `blockReason` inside JSX. The new [driveId]/page renders one of three empty-state components based on server-side checks before the form ever shows.
+- **Question ordering is client-side.** `apply-form.tsx` sorts by `sort_order` inside the render map rather than trusting the query. Defensive; the query does order too. No performance concern — questions are small arrays.
+- **Sign-in and complete-profile deep links.** Both use `?next=<current URL>` so the redirect chain returns the user to the exact page they were trying to reach. Matches existing site pattern.
+
+## Verification
+
+**Typecheck:** clean via `npm run typecheck` after the interface fixes.
+
+**Smoke test priorities** (per SETUP):
+1. **Not signed in → open drives visible** on club page, sign-in gate on drive card CTA
+2. **Signed in, eligible, no prior app** → apply page shows questions, submit works
+3. **Signed in, ineligible** → drive card grayed on club page; direct URL shows `<NotEligibleState>`
+4. **Signed in, already applied** → "Applied" badge on card; apply page shows edit form with prefilled responses
+5. **Multiple open drives** → landing page shows picker; single open drive → auto-redirect to `[driveId]`
+6. **Zero questions on a drive** (the post-migration state for pre-existing drives) → apply page shows `<NoQuestionsState>`, action rejects with the same message server-side
+
+## Files that Batch 2b still needs to touch
+
+Per SETUP + audit-plan Tier 6:
+- `app/(admin)/admin/clubs/[slug]/applications/page.tsx` — drive picker + join responses with prompts
+- `components/admin/application-review-row.tsx` — render `{ [question_id]: value }` against prompt lookup
+- `components/profile/application-row.tsx` — drive-name + target-years context
+- `components/admin/drive-list-row.tsx` — surface the `pending_count` field added in Batch 1
+- Possibly a small patch to `components/profile/applications-list.tsx` for grouping
+
+## What Batch 2a does NOT touch
+
+- Admin apps page (2b)
+- Profile applications list (2b)
+- DriveListRow pending count display (2b)
+- application-review-row (2b — currently reads `motivation/experience/contribution` from responses, will render `undefined` for post-16B applications)
+
+Ready for the smoke test. Once you say "Batch 2a clean," Batch 2b ships the admin side + profile.
+
+## Batch 2a — Post-landing fix: anon RLS/GRANT trap
+
+**Symptom** (smoke test 1, not-signed-in visit to a club page):
+```
+getOpenDrivesForClub failed: {
+  code: '42501',
+  hint: 'Grant the required privileges to the current role with:
+         GRANT SELECT ON public.applications TO anon;',
+  message: 'permission denied for table applications'
+}
+```
+
+**Root cause.** The initial `getOpenDrivesForClub` query embedded `applications!left(id, status, profile_id)` on the recruitments select. That LEFT JOIN materialized at the Postgres level, which requires the caller's role to have SELECT on `applications`. Only `authenticated` has that grant — `anon` doesn't (deliberately: no non-logged-in user should ever read applications). Signed-in scenarios worked because their role permits the join; signed-out visits 42501'd on every club-detail page render.
+
+Textbook Lesson 2 / Lesson 19 — grants and RLS are two layers, and even a "safe" LEFT JOIN counts against the caller's grants.
+
+**Fix.** Rewrote `getOpenDrivesForClub` in [lib/queries/apply.ts](lib/queries/apply.ts) to a two-query pattern:
+1. Recruitments-only fetch (no `applications` embed) — safe for both anon and authenticated.
+2. If `studentId` is non-null, a second `applications` query scoped to `.eq("profile_id", studentId).in("recruitment_id", driveIds)`. Skipped entirely for anon.
+
+Result: anon sees drives + eligibility state (based on `null` year → all `eligible=false`, which the section handles via the "Sign in to apply" CTA). Signed-in users get the same behaviour they had before — one small extra round-trip vs a JOIN, negligible cost.
+
+**Consistency note.** This matches the exact pattern `listDrivesForClub` uses for pending counts (Batch 1 introduced): fetch the parent list first, then a scoped follow-up query for per-caller state. Two files, same discipline.
+
+**Related lessons worth noting:**
+- Grants and RLS bite even on read-only joins. Embedded selects across tables materialize as JOINs at the Postgres layer, which respect grants of the caller's role — not just RLS policies. Anywhere a public-facing query might embed a table with restricted grants, unbundle to a two-query pattern.
+- The Supabase error hint (`GRANT SELECT ON ... TO anon`) is misleading here — following the hint would be the wrong fix. In this case the right fix is client-side (query shape), not database-side (grants).
+
+Typecheck clean after the fix. All 6 smoke test scenarios should now pass.
+
+

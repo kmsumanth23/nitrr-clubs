@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { placeholderBg } from "@/components/ui/icon";
+import { OpenDrivesSection } from "@/components/clubs/open-drives-section";
 import {
   getClubBySlug,
   getArchivedClubBySlug,
@@ -142,22 +143,13 @@ export default async function ClubDetailPage({
               {club.member_count ?? 0}
             </div>
             <div className="mb-4 text-xs text-ink-soft">active members</div>
-            {club.is_recruiting ? (
-              <>
-                <Button href={`/clubs/${club.slug}/apply`} className="w-full">
-                  Apply to join
-                </Button>
-                <p className="mt-2 text-center text-[11px] text-ink-soft">
-                  Recruitment is open
-                </p>
-              </>
-            ) : (
-              <div className="rounded-xl bg-white px-4 py-3 text-center text-xs text-ink-soft">
-                Recruitment is currently closed
-              </div>
-            )}
+            <div className="rounded-xl bg-white px-4 py-3 text-center text-xs text-ink-soft">
+              See open drives below to apply.
+            </div>
           </aside>
         </div>
+
+        <OpenDrivesSection clubId={club.id} clubSlug={club.slug} />
 
         {/* TEAM */}
         {club.team.length > 0 && (

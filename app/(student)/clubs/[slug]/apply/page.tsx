@@ -1,13 +1,23 @@
-import { notFound, redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import { IconArrowLeft } from "@tabler/icons-react";
+import { IconArrowLeft, IconArrowRight, IconLock } from "@tabler/icons-react";
 import { createClient } from "@/lib/supabase/server";
-import { ApplyForm } from "@/components/clubs/apply-form";
-import { isOpen, deadlineLabel } from "@/lib/deadline";
+import { getOpenDrivesForClub } from "@/lib/queries/apply";
+import { targetYearsLabel } from "@/lib/drive-format";
 
 export const metadata = { title: "Apply — NITRR Clubs" };
+export const dynamic = "force-dynamic";
 
-export default async function ApplyPage({
+/**
+ * Apply landing page — redirects based on open drive count.
+ *  - 0 open drives → redirect to club detail
+ *  - 1 open drive → redirect to /clubs/[slug]/apply/[driveId]
+ *  - 2+ open drives → show picker (this page)
+ *
+ * Not signed in → sign-in flow.
+ * Missing profile.year → complete profile flow.
+ */
+export default async function ApplyLandingPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -15,6 +25,7 @@ export default async function ApplyPage({
   const { slug } = await params;
   const supabase = await createClient();
 
+  // Auth gate
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -22,105 +33,118 @@ export default async function ApplyPage({
     redirect(`/?signin=1&next=${encodeURIComponent(`/clubs/${slug}/apply`)}`);
   }
 
+  // Club lookup
   const { data: club } = await supabase
     .from("clubs")
-    .select("id, name, slug, is_recruiting")
+    .select("id, name, slug")
     .eq("slug", slug)
     .maybeSingle();
   if (!club) notFound();
 
-  if (!club.is_recruiting) redirect(`/clubs/${slug}`);
-
-  // profile completeness gate
+  // Profile completeness gate
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, roll_number, year, branch")
+    .select("year, roll_number")
     .eq("id", user.id)
     .maybeSingle();
-  if (!profile?.roll_number) {
-    redirect(`/profile/complete?next=/clubs/${slug}/apply`);
+  if (!profile?.roll_number || profile.year === null) {
+    redirect(
+      `/profile/complete?next=${encodeURIComponent(`/clubs/${slug}/apply`)}`,
+    );
   }
 
-  // Current (latest) PUBLISHED recruitment for the club — 16A: draft
-  // drives are admin-only until published.
-  const { data: recruitment } = await supabase
-    .from("recruitments")
-    .select("id, deadline")
-    .eq("club_id", club.id)
-    .not("published_at", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Fetch open drives with per-student eligibility
+  const drives = await getOpenDrivesForClub(club.id, user.id, profile.year);
 
-  const open = !!recruitment && isOpen(recruitment.deadline);
+  // No open drives → back to club detail
+  if (drives.length === 0) {
+    redirect(`/clubs/${slug}`);
+  }
 
-  // already a member or admin? the DB trigger blocks it, but check here for a
-  // clean message instead of a failed submit. The existing-application check
-  // is scoped to the CURRENT recruitment (so old withdrawn apps from prior
-  // cycles don't drive the UI).
-  const [{ data: membership }, { data: adminRow }, { data: existing }] =
-    await Promise.all([
-      supabase
-        .from("club_members")
-        .select("id")
-        .eq("club_id", club.id)
-        .eq("profile_id", user.id)
-        .maybeSingle(),
-      supabase
-        .from("club_admins")
-        .select("id")
-        .eq("club_id", club.id)
-        .eq("profile_id", user.id)
-        .maybeSingle(),
-      recruitment
-        ? supabase
-            .from("applications")
-            .select("status")
-            .eq("recruitment_id", recruitment.id)
-            .eq("profile_id", user.id)
-            .maybeSingle()
-        : Promise.resolve({ data: null as { status: string } | null }),
-    ]);
+  // Exactly one → straight to the drive-specific apply page
+  if (drives.length === 1) {
+    redirect(`/clubs/${slug}/apply/${drives[0].id}`);
+  }
 
-  const blockReason = membership
-    ? "You're already a member of this club."
-    : adminRow
-      ? "You manage this club, so you can't apply to it."
-      : null;
-
+  // Multiple → picker
   return (
-    <section className="mx-auto max-w-xl px-6 pb-20 pt-28">
+    <section className="container mx-auto max-w-2xl px-4 py-10">
       <Link
         href={`/clubs/${slug}`}
         className="mb-4 inline-flex items-center gap-1.5 text-xs text-ink-soft hover:text-ink"
       >
-        <IconArrowLeft size={14} /> Back to {club.name}
+        <IconArrowLeft size={12} /> Back to {club.name}
       </Link>
 
-      <h1 className="text-3xl font-extrabold tracking-tight text-ink">
-        Apply to {club.name}
-      </h1>
-      <p className="mb-8 mt-2 text-sm text-ink-soft">
-        {deadlineLabel(recruitment?.deadline ?? null)}
-      </p>
+      <div className="mb-6">
+        <h1 className="font-display text-2xl font-bold text-ink">
+          Choose a drive to apply
+        </h1>
+        <p className="mt-1 text-sm text-ink-soft">
+          {club.name} is running {drives.length} drives. Pick the one that
+          fits.
+        </p>
+      </div>
 
-      {blockReason ? (
-        <div className="rounded-2xl border border-line bg-white p-6 text-sm text-ink">
-          {blockReason}
-        </div>
-      ) : !open ? (
-        <div className="rounded-2xl border border-line bg-white p-6 text-sm text-ink">
-          Applications for this club are closed. You may contact the club lead
-          for queries.
-        </div>
-      ) : (
-        <ApplyForm
-          clubId={club.id}
-          clubName={club.name}
-          profile={profile}
-          existingStatus={existing?.status ?? null}
-        />
-      )}
+      <div className="space-y-3">
+        {drives.map((d) => {
+          const applyHref = `/clubs/${slug}/apply/${d.id}`;
+          return (
+            <div
+              key={d.id}
+              className={
+                "rounded-2xl border p-5 " +
+                (d.eligible
+                  ? "border-line bg-white"
+                  : "border-line bg-cream/40 opacity-70")
+              }
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-lg font-bold text-ink">
+                    {d.name}
+                  </h3>
+                  {d.description && (
+                    <p className="mt-1 text-sm text-ink-soft">
+                      {d.description}
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
+                    <span className="rounded-full bg-beige px-2 py-0.5">
+                      For {targetYearsLabel(d.target_years)}
+                    </span>
+                  </div>
+                </div>
+
+                {d.has_applied ? (
+                  <Link
+                    href={applyHref}
+                    className="rounded-full border border-indigo bg-indigo/5 px-3 py-1.5 text-xs font-medium text-indigo hover:bg-indigo/10"
+                  >
+                    View application
+                  </Link>
+                ) : d.eligible ? (
+                  <Link
+                    href={applyHref}
+                    className="inline-flex items-center gap-1 rounded-full bg-indigo px-4 py-2 text-sm text-indigo-fg hover:bg-indigo/90"
+                  >
+                    Apply <IconArrowRight size={12} />
+                  </Link>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cream px-3 py-1.5 text-xs text-ink-soft">
+                    <IconLock size={11} /> Not eligible
+                  </span>
+                )}
+              </div>
+              {!d.eligible && (
+                <p className="mt-2 text-[11px] text-ink-soft">
+                  For Year {d.target_years.join(", ")} students only.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

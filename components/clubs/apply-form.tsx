@@ -14,38 +14,68 @@ interface KnownProfile {
   branch: string | null;
 }
 
+interface Question {
+  id: string;
+  prompt: string;
+  question_type: "short_text" | "long_text";
+  sort_order: number;
+  required: boolean;
+}
+
+interface ExistingApplication {
+  id: string;
+  status: string;
+  responses: Record<string, string>;
+}
+
 /**
- * Apply form. Known profile fields shown read-only (pulled from profile);
- * 3 generic questions are the inputs. If the student previously withdrew,
- * the action will update the same row back to pending — we show a small
- * "you previously withdrew" banner as a hint.
+ * Dynamic apply form. Renders one input per drive question.
+ * If an existing application is passed (edit mode), pre-fills responses
+ * and uses re-apply/edit copy on the submit button.
  */
 export function ApplyForm({
-  clubId,
+  driveId,
+  clubSlug,
   clubName,
   profile,
-  existingStatus,
+  questions,
+  existingApplication,
 }: {
-  clubId: string;
+  driveId: string;
+  clubSlug: string;
   clubName: string;
   profile: KnownProfile;
-  existingStatus: string | null;
+  questions: Question[];
+  existingApplication: ExistingApplication | null;
 }) {
   const [state, formAction] = useActionState<ApplicationResult, FormData>(
     submitApplication,
     {},
   );
 
-  const reapplying = existingStatus === "withdrawn";
+  const reapplying = existingApplication?.status === "withdrawn";
+  const editing =
+    existingApplication?.status === "pending" ||
+    existingApplication?.status === "reviewing";
+
+  const responses = existingApplication?.responses ?? {};
 
   return (
     <form action={formAction} className="space-y-5">
-      <input type="hidden" name="clubId" value={clubId} />
+      <input type="hidden" name="driveId" value={driveId} />
+      <input type="hidden" name="__club_slug" value={clubSlug} />
 
       {reapplying && (
         <div className="rounded-2xl border border-indigo-soft bg-indigo-soft px-4 py-3 text-xs text-indigo">
           You previously withdrew from {clubName}. Submitting will re-apply
           with your new answers.
+        </div>
+      )}
+
+      {editing && (
+        <div className="rounded-2xl border border-line bg-cream/40 px-4 py-3 text-xs text-ink-soft">
+          You&apos;ve already applied. You can update your answers until the
+          deadline.
         </div>
       )}
 
@@ -61,30 +91,71 @@ export function ApplyForm({
         </div>
       </div>
 
-      <Question
-        name="motivation"
-        label="Why do you want to join?"
-        placeholder="What draws you to this club?"
-        required
-      />
-      <Question
-        name="experience"
-        label="Relevant experience or skills"
-        placeholder="Anything you've done before (optional)"
-      />
-      <Question
-        name="contribution"
-        label="What can you contribute?"
-        placeholder="How would you add to the club?"
-        required
-      />
+      {questions
+        .slice()
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((q) => (
+          <QuestionField
+            key={q.id}
+            question={q}
+            defaultValue={responses[q.id] ?? ""}
+          />
+        ))}
 
       {state.error && (
         <p className="text-center text-xs text-clay">{state.error}</p>
       )}
 
-      <Submit reapplying={reapplying} />
+      <Submit editing={editing} reapplying={reapplying} />
     </form>
+  );
+}
+
+function QuestionField({
+  question,
+  defaultValue,
+}: {
+  question: Question;
+  defaultValue: string;
+}) {
+  const name = `q_${question.id}`;
+  const isShort = question.question_type === "short_text";
+  const maxLength = isShort ? 250 : 2000;
+  const placeholder = isShort
+    ? "Short answer"
+    : "Take your time — this is a paragraph question.";
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-ink">
+        {question.prompt}{" "}
+        {question.required && <span className="text-clay">*</span>}
+      </label>
+      {isShort ? (
+        <input
+          type="text"
+          name={name}
+          defaultValue={defaultValue}
+          required={question.required}
+          maxLength={maxLength}
+          placeholder={placeholder}
+          className="w-full rounded-xl border border-line bg-white p-3 text-sm text-ink outline-none focus:border-indigo"
+        />
+      ) : (
+        <textarea
+          name={name}
+          rows={4}
+          defaultValue={defaultValue}
+          required={question.required}
+          maxLength={maxLength}
+          placeholder={placeholder}
+          className="w-full resize-none rounded-xl border border-line bg-white p-3 text-sm text-ink outline-none focus:border-indigo"
+        />
+      )}
+      {!question.required && (
+        <p className="mt-1 text-[11px] text-ink-soft">Optional.</p>
+      )}
+    </div>
   );
 }
 
@@ -97,46 +168,26 @@ function Field({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-function Question({
-  name,
-  label,
-  placeholder,
-  required,
+function Submit({
+  editing,
+  reapplying,
 }: {
-  name: string;
-  label: string;
-  placeholder: string;
-  required?: boolean;
+  editing: boolean;
+  reapplying: boolean;
 }) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-sm font-medium text-ink">
-        {label} {required && <span className="text-clay">*</span>}
-      </label>
-      <textarea
-        name={name}
-        rows={3}
-        required={required}
-        placeholder={placeholder}
-        className="w-full resize-none rounded-xl border border-line bg-white p-3 text-sm text-ink outline-none focus:border-indigo"
-      />
-    </div>
-  );
-}
-
-function Submit({ reapplying }: { reapplying: boolean }) {
   const { pending } = useFormStatus();
+  const label = editing
+    ? "Update application"
+    : reapplying
+      ? "Re-apply"
+      : "Submit application";
   return (
     <button
       type="submit"
       disabled={pending}
       className="w-full rounded-full bg-indigo px-6 py-3 text-sm font-medium text-indigo-fg hover:bg-indigo/90 disabled:opacity-60"
     >
-      {pending
-        ? "Submitting…"
-        : reapplying
-          ? "Re-apply"
-          : "Submit application"}
+      {pending ? "Submitting…" : label}
     </button>
   );
 }
