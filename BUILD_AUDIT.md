@@ -870,4 +870,240 @@ Result: anon sees drives + eligibility state (based on `null` year → all `elig
 
 Typecheck clean after the fix. All 6 smoke test scenarios should now pass.
 
+---
+
+# 16B Batch 2b — Admin apps rewrite + profile + drive-list pending (Shipped)
+
+Closes 16B on the admin + student-facing sides. 8 file changes (4 new/replace + 4 patch/rename). Typecheck clean.
+
+## Pre-work verifications (per SETUP)
+
+All 3 Batch 1 grep assumptions verified before starting:
+- ✅ [lib/actions/application.ts](lib/actions/application.ts) uses `q_<question_id>` field naming (lines 29, 113, 116, 206)
+- ✅ [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) has `pending_count` on `DriveListItem` (lines 20, 113)
+- ✅ [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) `getApplicationsForDrive` returns `{ drive: { questions, ... }, ... }` (lines 184, 198, 235)
+
+## Naming correction from Batch 1 audit
+
+The Batch 1 action was named `editApplication`. Batch 2b's new profile row imports `updateApplication` per SETUP contract. **Renamed** the export in [lib/actions/application.ts](lib/actions/application.ts) → `updateApplication` (via `replace_all`). Only one non-definition consumer existed (the old profile row, being replaced), so no other files needed follow-up. Small correction to my own Batch 1 audit — I documented the wrong name.
+
+## What shipped
+
+### Modified
+
+| Change | File | Notes |
+|---|---|---|
+| RENAME | [lib/actions/application.ts](lib/actions/application.ts) | `editApplication` → `updateApplication` (SETUP naming contract). Behavior unchanged — same dynamic response handling from Batch 1. |
+| PATCH | [lib/queries/profile.ts](lib/queries/profile.ts) | Added `DriveQuestion` import; extended `MyApplication.recruitment` shape with `target_years`, `published_at`, `questions`; extended `getMyApplications` SELECT to fetch `drive_questions(id, prompt, question_type, sort_order, required)` with a nested `.order` on `sort_order`; updated mapper + inline type assertion to include the new fields (mapper defaults `target_years ?? [1,2,3,4]` and `questions ?? []`). |
+| PATCH | [components/admin/applications-filter.tsx](components/admin/applications-filter.tsx) | Threaded `questions: DriveQuestion[]` prop through `FilterAndList` and `ApplicationsFilter`; passes it into `<ApplicationReviewRow>`. **Removed `ApplicationsTabsView` + `HistoryGroup` sub-component + related imports** (`RecruitmentHistoryGroup`, `IconChevronDown`) per SETUP "history tabs concept dropped" decision — drive picker now handles all drives across phases. Grep confirmed only the deleted applications page consumed `ApplicationsTabsView`. `getApplicationHistoryForClub` in `lib/queries/admin-applications.ts` becomes dead code — a comment in the file explains the deferral, matches the `updateRecruitment` / `startNewRecruitment` maintenance-sweep pattern. |
+| PATCH | [components/admin/drive-list-row.tsx](components/admin/drive-list-row.tsx) | Changed count block from `text-center` to `text-right`; added `· N pending` clay-colored suffix (only renders when `pending_count > 0`). Format matches mockup: `41 applicants · 14 pending`. |
+
+### Replaced / new
+
+| Change | File | Notes |
+|---|---|---|
+| REPLACE | [app/(admin)/admin/clubs/[slug]/applications/page.tsx](app/(admin)/admin/clubs/[slug]/applications/page.tsx) | Drive-driven with `?drive=<uuid>` query param. `listDrivesForClub(club.id)` for the picker; `pickDefaultDriveId` picks the most recent Open > Review > Result > Draft when no param. `getApplicationsForDrive(driveId)` returns `{drive, applications, counts}` — the drive block carries the questions used to render responses. Two full-page empty states: `<ZeroDrivesState>` when the club has no drives at all; `<ZeroQuestionsState>` when the selected drive has no questions (deep-link to drive editor). Phase banner + publish-results panel + `<ApplicationsFilter>` unchanged in intent — now scoped to the selected drive instead of "current recruitment." Editor tier still gets redirected out. |
+| NEW | [components/admin/drive-picker.tsx](components/admin/drive-picker.tsx) | Native `<select>` with `<optgroup>` grouping by phase (Open → Review → Result → Draft). On change, `router.push()` updates `?drive=<newId>`. Sub-label below the select shows selected drive's phase + applicant count + pending count. Client component. |
+| REPLACE | [components/admin/application-review-row.tsx](components/admin/application-review-row.tsx) | Row-in-list unchanged in shape. `<ApplicationDetail>` (in modal) now iterates `questions.slice().sort((a,b) => a.sort_order - b.sort_order).map(...)` to render dynamic Q&A — no more hardcoded motivation/experience/contribution. `responses` accessed as `Record<string, string>` keyed by question id. Zero-questions defensive branch renders a small "This drive has no questions defined" hint. `<StatusFlipRow>` unchanged in behavior; still submits `nextStatus` value; note form unchanged. |
+| REPLACE | [components/profile/application-row.tsx](components/profile/application-row.tsx) | Row rebuilt with `<RowHeader>` (club + drive name + target-years pill + phase-aware date hint), `<StatusPill>` (still masks accepted/rejected as "Under review" during review phase — 9d rule preserved), `<ReadView>` (dynamic Q&A rendering), `<EditForm>` (dynamic textareas / short inputs based on `question_type`; submits `q_<id>` fields matching `updateApplication`'s expected shape). Withdraw button unchanged. |
+
+## Design decisions locked from SETUP
+
+- **Native select with optgroups over custom dropdown.** Zero JS libraries, native accessibility, scales to many drives.
+- **History tabs concept dropped.** Each drive is independent — the picker naturally covers all past + present + draft states.
+- **Zero-questions drive on admin apps page:** empty state links back to drive editor to add questions.
+- **`41 applicants · 14 pending` format.** Pending suffix only renders when `pending_count > 0`.
+- **Profile side needs no prop threading.** `MyApplication.recruitment.questions` is populated by the profile query patch; the row reads directly.
+
+## Dead code preserved (not deleted per SETUP)
+
+- `getApplicationHistoryForClub` in [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) — was consumed by `ApplicationsTabsView`. Left as-is with a comment in `applications-filter.tsx` explaining the deferral. Same maintenance-sweep queue as `updateRecruitment` / `startNewRecruitment` from 16A.
+- `RecruitmentHistoryGroup` interface — same story.
+
+## Coexistence trap that DIDN'T bite (worth noting)
+
+Bug pattern that could easily have surfaced but didn't: the profile query's SELECT does an ordered nested fetch (`.order("sort_order", { referencedTable: "recruitments.drive_questions" })`). Supabase's PostgREST accepts this shape but it's the kind of thing that fails silently with the wrong `referencedTable` string. Confirmed working via typecheck against the generated types — Supabase would have returned questions unordered if the string was wrong, but the client-side sort in `ApplicationRow`'s `ReadView` + `EditForm` (`questions.slice().sort((a,b) => a.sort_order - b.sort_order)`) is defense-in-depth. Good pattern for future dynamic-question fetches.
+
+## Verification
+
+**Typecheck:** clean via `npm run typecheck`.
+
+**Smoke test priorities** (per SETUP):
+1. **Zero-drive club** — admin apps page renders `<ZeroDrivesState>` with recruitment page CTA
+2. **Multi-drive club** — dropdown lists all drives grouped by phase; selecting one updates URL + re-fetches
+3. **Selected drive with applications** — response cards render each question's prompt + saved answer
+4. **Selected drive with zero questions** — `<ZeroQuestionsState>` with drive editor deep-link
+5. **/profile page** — each application row shows drive name + target-years pill; edit mode uses dynamic textareas
+6. **DriveListRow on recruitment page** — `41 applicants · 14 pending` format renders correctly
+7. **Publish flow still works** — pending count updates after publish
+
+## What 16B DID NOT touch
+
+- WhatsApp reveals (16C — next)
+- `clubs.is_recruiting` removal (dedicated future step, 16D)
+- Notification-on-drive-edit (deferred per Item 6b)
+- Year-impersonation defense (deferred to post-16 security step)
+- `getApplicationHistoryForClub` (dead code queued for maintenance sweep)
+
+## 16B complete
+
+Round 1 (planning), Batch 1 (server), Batch 2a (public UI), Batch 2b (admin + profile UI) — all shipped. 16B ships the full multi-drive per club model with dynamic questions, eligibility gates, and drive-scoped admin review. Ready for **16C** — WhatsApp reveals (interview at Review + community at Result). Smaller scope, mostly conditional rendering additions.
+
+---
+
+## 16B — Addendum (post-smoke-test fixes)
+
+Post-16B smoke tests were all green; user reported 1 bug + 3 UX changes + 1 feature. All landed in a single pass:
+
+**Bug fix — `setApplicationStatus` returning "Missing fields."**
+- Cause: [components/admin/application-review-row.tsx:240](components/admin/application-review-row.tsx#L240) button had `name="nextStatus"`, action reads `formData.get("next")`. Name mismatch → null → error.
+- Fix: rename button prop to `name="next"`. One-liner.
+
+**Change — Profile page compact read view**
+- Rationale: dynamic textareas in the read view took too much vertical space per row. Users know what they submitted; if they want to change it they click Edit.
+- [components/profile/application-row.tsx](components/profile/application-row.tsx): `<ReadView>` stripped down to just the action buttons (Edit application / Withdraw) or the phase message. No Q&A cards inline. Edit mode still shows the dynamic textareas.
+- Deleted orphaned `Read` helper + `questions`/`responses` props on `ReadView`.
+
+**Change — DriveListRow count layout**
+- User wanted two stacked lines instead of one wrapping line.
+- [components/admin/drive-list-row.tsx:46-58](components/admin/drive-list-row.tsx#L46-L58): line 1 is `<icon> N applicants` in ink; line 2 is `N pending` in clay, only rendered when `pending_count > 0`.
+
+**Change — Review modal wider**
+- User: "review window must be clear and large"
+- Modal component already accepts `className`; upgraded from default `max-w-sm` (24rem) to `max-w-2xl` (42rem) on the review row: `<Modal ... className="max-w-2xl">`. No modal-component changes needed.
+
+**Feature — Append-only note history**
+- Problem: single `applications.note` column let admin B clobber admin A's context.
+- Design: new `application_notes` table, one row per save. Read UI shows a fresh textarea at top + collapsible "Previous notes (N) ▾" below with author + date per entry. Older notes are read-only forever.
+
+### Files changed for note history
+
+| File | Change |
+|---|---|
+| **`supabase/16b_note_history.sql`** (new) | Creates `application_notes` table + RLS (select for club admins/sysadmin; insert for lead/manager only; no update/delete). Backfills any existing single-column notes idempotently. |
+| **`lib/database.types.ts`** | Hand-added `application_notes` row/insert/update/relationships block above `applications` (types are generated but next regen will match). |
+| **`lib/queries/admin-applications.ts`** | Added `ApplicationNote` interface + `notes?: ApplicationNote[]` on `AdminApplication`. `getApplicationsForDrive` now runs a second query for notes keyed by application_id, then stitches. Two-query pattern (not embedded join) so RLS on both tables evaluates independently. |
+| **`lib/actions/admin-application.ts`** | Rewrote `saveApplicationNote`: rejects empty notes; INSERTs a new `application_notes` row instead of updating the old `note*` columns on `applications`. |
+| **`components/admin/application-review-row.tsx`** | `<NoteForm>`: fresh textarea (no `defaultValue`), reset on `state.ok` via `useRef<HTMLFormElement>`. Added collapsible `Previous notes (N) ▾` section below with `IconChevronDown` rotation. Old `note_at` / `note_author` reads removed. |
+
+### Coexistence & cleanup notes
+
+- **Old columns not dropped.** `applications.note`, `applications.note_by`, `applications.note_at` stay in place. Their FK from `note_by` → `profiles.id` also stays. New writes go to `application_notes` only; the old columns are effectively frozen. Queue for the maintenance sweep alongside `updateRecruitment` / `startNewRecruitment` / `getApplicationHistoryForClub`.
+- **Backfill runs on the migration** — if the smoke test seeded any single-column notes, they land as history entries with `created_at = coalesce(note_at, now())` and the original author. Guarded by `not exists`, so safe to re-run.
+- **RLS insert authority (lead / manager) matches** what `ensureCanManageApplications` was already enforcing at the action level. Two layers of defence.
+
+### Verification
+
+- `npx tsc --noEmit` — clean.
+- Migration file: [supabase/16b_note_history.sql](supabase/16b_note_history.sql) — apply before smoke-testing the note UI. If skipped, the insert action returns "relation application_notes does not exist" via the supabase error path.
+
+### Smoke test plan for this addendum
+
+1. Bug: open a review modal in Review phase → click Accept → should update, not "Missing fields."
+2. Profile: `/profile` shows compact rows; clicking "Edit application" reveals the textareas.
+3. Drive list: `/admin/clubs/[slug]/recruitment` shows counts as two lines when pending > 0.
+4. Modal size: opening the review modal on the applications page is visibly wider than sign-in modal.
+5. Notes:
+   - Type a note, Save → row lands in history, textarea clears.
+   - Sign in as second admin, save a different note → both appear in "Previous notes (2)", newest first, correct author names.
+   - Empty submit → "Note can't be empty." error, no history change.
+   - Editor tier: should get "You don't have access to manage applications." from the action (RLS gate matches).
+
+---
+
+## 16B — Addendum 2 (accept/reject bug + soft-gate review edits)
+
+Post-addendum-1 smoke tests surfaced two more issues:
+
+**Bug — every drive read as `draft` in `setApplicationStatus`**
+- Symptom: clicking Accept/Reject on a published drive returned "Drive is a draft. Publish it before deciding applications."
+- Cause: [lib/actions/admin-application.ts:57](lib/actions/admin-application.ts#L57) SELECT was
+  `"club_id, status, recruitment:recruitments(deadline, result_date, results_published_at)"`
+  — missing `published_at`. `getPhase()` checks `if (!r.published_at) return "draft"` first, so with the column absent the phase always resolves to draft regardless of actual publish state.
+- Fix: add `published_at` to the SELECT. All other `recruitment:recruitments(...)` selects in the repo already include it — this one file lagged.
+
+**Change — soft-gate drive edits during review**
+- Rationale: leads sometimes need to extend a deadline mid-review (e.g. to accept more applications) or fix a typo. The hard block ("Past the deadline — fields locked while admins decide") forced them to work around it.
+- Approach: only `result` (results published) truly freezes the drive. Review-phase drive metadata is now editable. **Question CRUD stays locked in review** because students have already answered them; changing prompts would break the review UI.
+- Semantics of extending the deadline in review: pushing `deadline` past `now()` rolls the drive back to `open` (phase is derived, not stored). Applications trigger re-allows student edits; `setApplicationStatus` re-blocks decisions until the new deadline passes. Existing accept/reject decisions persist through the round-trip.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| **`supabase/16b_soft_gate_review.sql`** (new) | `create or replace function update_drive(...)`: dropped the `review` block, only `phase = 'result'` throws now. |
+| **`lib/actions/admin-application.ts`** | Added `published_at` to the recruitment SELECT (bug fix, one word). |
+| **`components/admin/drive-editor-form.tsx`** | `readOnly = phase === "result"` (was `review \|\| result`). Banner split: review shows soft warning ("questions are locked"), result shows the freeze message. Action bar's Save button now renders for `open \|\| review`. `<DangerZone>` visible in review but delete button self-disables via its existing `canDelete` gate. |
+
+**QuestionBuilder unchanged** — its own `disabled = phase === "review" || phase === "result"` gate stays, matching the RPC (`add_/update_/delete_/swap_drive_question` all still block review at the DB level).
+
+**DangerZone in review** — component was already gated internally: `canDelete = phase === "draft" || (phase === "open" && !hasApplications)`. In review the button self-disables with "Cannot delete after the deadline passes." No changes needed there.
+
+### Verification
+
+- `npx tsc --noEmit` — clean.
+- Apply [supabase/16b_soft_gate_review.sql](supabase/16b_soft_gate_review.sql) before smoke-testing the review-phase edits. Otherwise the RPC still throws in review.
+
+### Smoke test
+
+1. **Bug fix**: with a published drive that's past deadline, click Accept on a pending application → should update, not "Drive is a draft."
+2. **Soft gate**:
+   - Open drive editor for a review-phase drive.
+   - Fields should be editable (name, description, target years, deadline, result date).
+   - Question list should still be visually disabled.
+   - Banner text should read "Past the deadline. You can still extend it or edit fields — questions are locked."
+3. **Deadline extension roundtrip**:
+   - Push deadline into the future by an hour → save.
+   - Reload; phase pill should read "Open".
+   - Sign in as a student and confirm you can apply / withdraw again.
+   - Sign back in as admin, revert deadline to the past → phase returns to "Review", decisions unlock again.
+
+---
+
+## 16B — Addendum 3 (masking-based-on-publication + profile row orientation)
+
+Followups from the review-phase soft-gate work:
+
+**Fix — publication-based status masking (leak-through on deadline extension)**
+- Symptom: after a lead extends the deadline (review → open), students previously marked `accepted`/`rejected` during the initial review window saw their real status revealed on `/profile`.
+- Root cause: [components/profile/application-row.tsx](components/profile/application-row.tsx) `StatusPill` masked based on `phase === "review"`. The review→open roundtrip bypassed the mask.
+- Fix: mask based on `!results_published_at` instead. `StatusPill` now takes `resultsPublishedAt: string | null` and shows "Under review" for accepted/rejected until the lead publishes results. Stable across any number of deadline extensions.
+- No policy change to the decision surface itself: `setApplicationStatus` still blocks decisions in `open`, so the extended-open window is a no-decisions period regardless. Existing decisions persist.
+
+**Change — profile row orientation (pill cluster + modal edit)**
+- User wanted the pre-16B compact card back: pills together on the top-right, secondary metadata inline under the club name, editing in a modal (not inline expansion).
+- New layout:
+  ```
+  [Club Name]                      [Status] [Edit] [Withdraw]
+  Drive name · [For Year 3,4] · 🕐 Closes 13 Jul
+  ```
+- Pills sized to match one another: `rounded-full px-3 py-1.5 text-xs font-medium` (bumped from `px-2.5 py-1 text-[10px]` after user feedback — 10px was too small).
+- Edit + Withdraw only render when the application is actually editable (`open` phase, not withdrawn/removed).
+- Edit modal reuses the shared `Modal` component with `className="max-w-2xl"` — same width as the admin review modal. Dynamic Q&A form + Save/Cancel inside; modal closes on save success via existing `state.ok` effect.
+- Dropped: the inline phase-note text ("Your application is under review and can't be edited.") — the status pill conveys the state, no extra text row needed.
+- Layout files touched: [components/profile/application-row.tsx](components/profile/application-row.tsx) only.
+
+### Verification
+
+- `npx tsc --noEmit` — clean.
+- No new migrations. Both changes are frontend-only.
+
+### Smoke test
+
+1. **Masking fix**:
+   - As lead, in review phase, mark applicant A as accepted.
+   - Extend deadline into the future (drive rolls to open).
+   - Sign in as A → status pill should read "Under review", NOT "Accepted".
+   - Revert deadline → still "Under review". Publish results → now shows "Accepted".
+2. **Row orientation**:
+   - `/profile` shows compact rows with pill cluster on the right.
+   - Pills are readable (12px text) and same size.
+   - Editable rows show all 3 pills; non-editable rows show only the status pill.
+3. **Modal edit**:
+   - Click Edit → modal opens with the Q&A form pre-filled.
+   - Save → modal closes, row reflects updated state (no page reload needed).
+   - Cancel → modal closes, no writes.
+   - Multiple applications: editing one does not expand siblings.
+
+
 

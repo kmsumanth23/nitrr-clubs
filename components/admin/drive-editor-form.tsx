@@ -51,7 +51,11 @@ export function DriveEditorForm({
 }) {
   const isEdit = mode === "edit" && !!drive;
   const phase: Phase = isEdit ? drive!.phase : "draft";
-  const readOnly = phase === "review" || phase === "result";
+  // Soft gate: only `result` freezes the drive. Review-phase edits are allowed
+  // (main use case: extending the deadline, which rolls the drive back to
+  // open). Question CRUD is separately blocked in review via QuestionBuilder,
+  // since students have already answered them.
+  const readOnly = phase === "result";
 
   const action = isEdit ? updateDrive : createDrive;
   const [state, formAction, isPending] = useActionState<DriveResult, FormData>(
@@ -125,11 +129,15 @@ export function DriveEditorForm({
             </span>
             <span className="text-sm text-ink">{drive!.name}</span>
           </div>
+          {phase === "review" && (
+            <p className="text-xs text-ink-soft">
+              Past the deadline. You can still extend it or edit fields —
+              questions are locked (students already answered).
+            </p>
+          )}
           {readOnly && (
             <p className="text-xs text-ink-soft">
-              {phase === "review"
-                ? "Past the deadline — fields locked while admins decide."
-                : "Results published — this drive is frozen."}
+              Results published — this drive is frozen.
             </p>
           )}
         </div>
@@ -401,8 +409,10 @@ export function DriveEditorForm({
                 </>
               )}
 
-              {/* EDIT mode OPEN: [Save changes] */}
-              {isEdit && phase === "open" && (
+              {/* EDIT mode OPEN or REVIEW: [Save changes]. Review is a soft
+                  gate — leads may extend the deadline (which rolls back to
+                  open) or fix typos. */}
+              {isEdit && (phase === "open" || phase === "review") && (
                 <button
                   type="submit"
                   form="drive-form"

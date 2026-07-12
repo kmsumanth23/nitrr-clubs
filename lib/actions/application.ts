@@ -160,7 +160,7 @@ export async function submitApplication(
 
 /** Edit own application. Open phase only. Dynamic responses validated
  *  against the drive's current questions (same shape as submit). */
-export async function editApplication(
+export async function updateApplication(
   _prev: ApplicationResult,
   formData: FormData,
 ): Promise<ApplicationResult> {

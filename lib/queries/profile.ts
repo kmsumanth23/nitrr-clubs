@@ -5,6 +5,7 @@ import type {
   Club,
   Category,
 } from "@/lib/database.types";
+import type { DriveQuestion } from "@/lib/queries/admin-drives";
 
 export interface MyApplication extends Application {
   recruitment: {
@@ -13,6 +14,9 @@ export interface MyApplication extends Application {
     deadline: string | null;
     result_date: string | null;
     results_published_at: string | null;
+    target_years: number[]; // 16B
+    published_at: string | null; // 16A
+    questions: DriveQuestion[]; // 16B — sorted by sort_order
   } | null;
   club: (Pick<Club, "name" | "slug"> & { category: Category | null }) | null;
 }
@@ -58,10 +62,18 @@ export async function getMyApplications(): Promise<MyApplication[]> {
     .from("applications")
     .select(
       `*,
-       recruitment:recruitments(id, name, deadline, result_date, results_published_at, club:clubs(name, slug, category:categories(*)))`,
+       recruitment:recruitments(
+         id, name, deadline, result_date, results_published_at, target_years, published_at,
+         club:clubs(name, slug, category:categories(*)),
+         drive_questions(id, prompt, question_type, sort_order, required)
+       )`,
     )
     .eq("profile_id", user.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("sort_order", {
+      referencedTable: "recruitments.drive_questions",
+      ascending: true,
+    });
   if (error) throw error;
 
   return ((data ?? []) as unknown as Array<
@@ -72,7 +84,10 @@ export async function getMyApplications(): Promise<MyApplication[]> {
         deadline: string | null;
         result_date: string | null;
         results_published_at: string | null;
+        target_years: number[];
+        published_at: string | null;
         club: { name: string; slug: string; archived_at: string | null; category: Category | null } | null;
+        drive_questions: DriveQuestion[] | null;
       } | null;
     }
   >).map((a) => ({
@@ -84,6 +99,9 @@ export async function getMyApplications(): Promise<MyApplication[]> {
           deadline: a.recruitment.deadline,
           result_date: a.recruitment.result_date,
           results_published_at: a.recruitment.results_published_at,
+          target_years: a.recruitment.target_years ?? [1, 2, 3, 4],
+          published_at: a.recruitment.published_at,
+          questions: a.recruitment.drive_questions ?? [],
         }
       : null,
     club: a.recruitment?.club ?? null,

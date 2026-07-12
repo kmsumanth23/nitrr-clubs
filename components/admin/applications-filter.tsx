@@ -1,15 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { IconChevronDown } from "@tabler/icons-react";
 import { ApplicationReviewRow } from "@/components/admin/application-review-row";
-import type {
-  AdminApplication,
-  RecruitmentForAdmin,
-  RecruitmentHistoryGroup,
-} from "@/lib/queries/admin-applications";
+import type { AdminApplication } from "@/lib/queries/admin-applications";
 import type { Phase } from "@/lib/phase";
 import type { ApplicationStatus } from "@/lib/database.types";
+import type { DriveQuestion } from "@/lib/queries/admin-drives";
 
 type Filter = "all" | ApplicationStatus;
 const FILTERS: { key: Filter; label: string }[] = [
@@ -22,19 +18,21 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "removed", label: "Removed" },
 ];
 
-/** Filter pills + list for one recruitment's applications. Used by the
- *  Current tab AND by each History group, so the rendering rule stays
- *  in one place. */
+/** Filter pills + list for one drive's applications. 16B: `questions` prop
+ *  is threaded down to each review row so the modal can render dynamic
+ *  Q&A against `drive_questions` prompts. */
 function FilterAndList({
   applications,
   counts,
   clubSlug,
   phase,
+  questions,
 }: {
   applications: AdminApplication[];
   counts: Record<Filter, number>;
   clubSlug: string;
   phase: Phase;
+  questions: DriveQuestion[];
 }) {
   const [active, setActive] = React.useState<Filter>("all");
   const filtered =
@@ -77,6 +75,7 @@ function FilterAndList({
               app={app}
               clubSlug={clubSlug}
               phase={phase}
+              questions={questions}
             />
           ))}
         </ul>
@@ -90,11 +89,13 @@ export function ApplicationsFilter({
   counts,
   clubSlug,
   phase,
+  questions,
 }: {
   applications: AdminApplication[];
   counts: Record<Filter, number>;
   clubSlug: string;
   phase: Phase;
+  questions: DriveQuestion[];
 }) {
   return (
     <FilterAndList
@@ -102,134 +103,15 @@ export function ApplicationsFilter({
       counts={counts}
       clubSlug={clubSlug}
       phase={phase}
+      questions={questions}
     />
   );
 }
 
-/** One group on the History tab: a recruitment + its applications. */
-function HistoryGroup({
-  group,
-  clubSlug,
-  defaultOpen,
-}: {
-  group: RecruitmentHistoryGroup;
-  clubSlug: string;
-  defaultOpen: boolean;
-}) {
-  const [open, setOpen] = React.useState(defaultOpen);
-  const { recruitment: rec, applications, counts } = group;
-
-  return (
-    <section className="rounded-2xl border border-line bg-white">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-cream"
-      >
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-ink">
-            {rec.name ?? "Recruitment"}
-          </div>
-          <div className="mt-0.5 text-xs text-ink-soft">
-            {rec.deadline && (
-              <>Closed {new Date(rec.deadline).toLocaleDateString("en-IN")}</>
-            )}
-            {rec.results_published_at && (
-              <>
-                {" · "}Published{" "}
-                {new Date(rec.results_published_at).toLocaleDateString("en-IN")}
-              </>
-            )}
-            {" · "}
-            {counts.all} application{counts.all === 1 ? "" : "s"}
-          </div>
-        </div>
-        <IconChevronDown
-          size={16}
-          className={`transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open && (
-        <div className="border-t border-line p-4">
-          {/* History is always result-phase, so phase="result" */}
-          <FilterAndList
-            applications={applications}
-            counts={counts}
-            clubSlug={clubSlug}
-            phase="result"
-          />
-        </div>
-      )}
-    </section>
-  );
-}
-
-/** Tab switcher + Current view + History list. Receives the current view
- *  as children so the page can build its phase banner/publish panel
- *  server-side. */
-export function ApplicationsTabsView({
-  currentView,
-  historyGroups,
-  clubSlug,
-}: {
-  currentView: React.ReactNode;
-  historyGroups: RecruitmentHistoryGroup[];
-  clubSlug: string;
-}) {
-  const [tab, setTab] = React.useState<"current" | "history">("current");
-  const hasHistory = historyGroups.length > 0;
-
-  return (
-    <>
-      <div className="mb-6 inline-flex rounded-full border border-line bg-white p-1 text-xs">
-        <button
-          type="button"
-          onClick={() => setTab("current")}
-          className={
-            "rounded-full px-4 py-1.5 transition-colors " +
-            (tab === "current"
-              ? "bg-ink text-cream"
-              : "text-ink-soft hover:text-ink")
-          }
-        >
-          Current
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("history")}
-          className={
-            "rounded-full px-4 py-1.5 transition-colors " +
-            (tab === "history"
-              ? "bg-ink text-cream"
-              : "text-ink-soft hover:text-ink")
-          }
-        >
-          History{" "}
-          {hasHistory && (
-            <span className="ml-1 opacity-70">{historyGroups.length}</span>
-          )}
-        </button>
-      </div>
-
-      {tab === "current" ? (
-        currentView
-      ) : !hasHistory ? (
-        <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
-          No prior recruitments. History will appear here after the next
-          recruitment publishes.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {historyGroups.map((g, i) => (
-            <HistoryGroup
-              key={g.recruitment.id}
-              group={g}
-              clubSlug={clubSlug}
-              defaultOpen={i === 0}
-            />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
+// 16B: `ApplicationsTabsView` + `HistoryGroup` removed. The pre-16B "history"
+// concept ("prior recruitments") is subsumed by 16B's drive picker on the
+// admin apps page — each drive is independent, past + present + draft are
+// all navigable via the picker. `getApplicationHistoryForClub` in
+// `lib/queries/admin-applications.ts` is dead code from here; leaving it for
+// a future maintenance sweep (matches how updateRecruitment /
+// startNewRecruitment are handled post-16A).

@@ -54,7 +54,7 @@ export async function setApplicationStatus(
   const { data: app } = await supabase
     .from("applications")
     .select(
-      "club_id, status, recruitment:recruitments(deadline, result_date, results_published_at)",
+      "club_id, status, recruitment:recruitments(deadline, result_date, published_at, results_published_at)",
     )
     .eq("id", applicationId)
     .maybeSingle();
@@ -95,6 +95,9 @@ export async function setApplicationStatus(
   return { ok: true };
 }
 
+/** Append a new internal note. Notes are append-only history now — each
+ *  save creates a new `application_notes` row; older ones stay visible in
+ *  the collapsible history section. */
 export async function saveApplicationNote(
   _prev: ReviewResult,
   formData: FormData,
@@ -103,6 +106,9 @@ export async function saveApplicationNote(
   const note = (formData.get("note") as string) ?? "";
   const clubSlug = formData.get("__club_slug") as string;
   if (!applicationId) return { error: "Missing application id." };
+
+  const trimmed = note.trim();
+  if (!trimmed) return { error: "Note can't be empty." };
 
   const supabase = await createClient();
   const { data: app } = await supabase
@@ -115,15 +121,13 @@ export async function saveApplicationNote(
   const auth = await ensureCanManageApplications(app.club_id);
   if (!auth.ok) return { error: auth.error };
 
-  const trimmed = note.trim();
   const { error } = await supabase
-    .from("applications")
-    .update({
-      note: trimmed || null,
-      note_by: trimmed ? auth.userId : null,
-      note_at: trimmed ? new Date().toISOString() : null,
-    })
-    .eq("id", applicationId);
+    .from("application_notes")
+    .insert({
+      application_id: applicationId,
+      author_id: auth.userId,
+      body: trimmed,
+    });
   if (error) return { error: error.message };
 
   revalidatePath(`/admin/clubs/${clubSlug}/applications`);

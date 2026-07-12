@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { IconChevronDown } from "@tabler/icons-react";
 import { Modal } from "@/components/ui/modal";
 import {
   setApplicationStatus,
@@ -12,6 +13,7 @@ import {
 import type { AdminApplication } from "@/lib/queries/admin-applications";
 import type { ApplicationStatus } from "@/lib/database.types";
 import type { Phase } from "@/lib/phase";
+import type { DriveQuestion } from "@/lib/queries/admin-drives";
 
 const STATUS_STYLES: Record<ApplicationStatus, string> = {
   pending: "bg-beige text-ink-soft",
@@ -22,20 +24,21 @@ const STATUS_STYLES: Record<ApplicationStatus, string> = {
   removed: "bg-clay-soft text-clay",
 };
 
-type Responses = {
-  motivation?: string;
-  experience?: string;
-  contribution?: string;
-};
-
+/**
+ * One row in the admin applications review list.
+ * Click "View" → modal shows dynamic Q&A based on the drive's questions,
+ * status flip UI, and internal note form.
+ */
 export function ApplicationReviewRow({
   app,
   clubSlug,
   phase,
+  questions,
 }: {
   app: AdminApplication;
   clubSlug: string;
   phase: Phase;
+  questions: DriveQuestion[];
 }) {
   const [open, setOpen] = React.useState(false);
 
@@ -69,11 +72,12 @@ export function ApplicationReviewRow({
         </button>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)}>
+      <Modal open={open} onClose={() => setOpen(false)} className="max-w-2xl">
         <ApplicationDetail
           app={app}
           clubSlug={clubSlug}
           phase={phase}
+          questions={questions}
           onClose={() => setOpen(false)}
         />
       </Modal>
@@ -85,19 +89,16 @@ function ApplicationDetail({
   app,
   clubSlug,
   phase,
-  onClose,
+  questions,
 }: {
   app: AdminApplication;
   clubSlug: string;
   phase: Phase;
+  questions: DriveQuestion[];
   onClose: () => void;
 }) {
-  const r = (app.responses ?? {}) as Responses;
-  // 16A: applications shouldn't exist against a draft drive (trigger blocks
-  // it); if one somehow reaches this row, render nothing rather than
-  // showing action buttons that would fail server-side.
-  if (phase === "draft") return null;
-
+  // Responses is now Record<string, string> keyed by question.id (post-16B).
+  const responses = (app.responses ?? {}) as Record<string, string>;
   const isFinal =
     app.status === "withdrawn" ||
     app.status === "removed" ||
@@ -107,53 +108,50 @@ function ApplicationDetail({
     <div className="space-y-5">
       <div>
         <h3 className="font-display text-lg font-bold text-ink">
-          {app.applicant?.full_name ?? "Application"}
+          {app.applicant?.full_name ?? "—"}
         </h3>
-        <p className="mt-0.5 text-xs text-ink-soft">{app.applicant?.email}</p>
+        <div className="mt-1 grid grid-cols-2 gap-3 rounded-2xl bg-beige p-4 text-xs text-ink-soft">
+          <Snap label="Roll" value={app.applicant?.roll_number ?? null} />
+          <Snap label="Email" value={app.applicant?.email ?? null} />
+          <Snap
+            label="Year"
+            value={app.applicant?.year?.toString() ?? null}
+          />
+          <Snap label="Branch" value={app.applicant?.branch ?? null} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 rounded-xl bg-beige p-3 text-xs">
-        <Snap label="Roll" value={app.applicant?.roll_number} />
-        <Snap label="Year" value={app.applicant?.year?.toString()} />
-        <Snap label="Branch" value={app.applicant?.branch} />
+      {/* Dynamic Q&A section */}
+      <div className="space-y-3">
+        {questions
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((q) => (
+            <ReadBlock
+              key={q.id}
+              label={q.prompt}
+              value={responses[q.id]}
+            />
+          ))}
+        {questions.length === 0 && (
+          <p className="rounded-xl border border-line bg-cream/40 p-3 text-xs text-ink-soft">
+            This drive has no questions defined.
+          </p>
+        )}
       </div>
 
-      <ReadBlock label="Why do you want to join?" value={r.motivation} />
-      <ReadBlock label="Relevant experience or skills" value={r.experience} />
-      <ReadBlock label="What can you contribute?" value={r.contribution} />
-
+      {/* Note form */}
       <NoteForm app={app} clubSlug={clubSlug} />
 
-      <div className="border-t border-line pt-4">
-        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-soft">
-          Status
-        </div>
-        {app.status === "withdrawn" && (
-          <p className="text-xs text-ink-soft">
-            The student withdrew this application during the open phase.
-          </p>
-        )}
-        {app.status === "removed" && (
-          <p className="text-xs text-ink-soft">
-            This member was removed from the club. Their application history
-            is preserved.
-          </p>
-        )}
-        {!isFinal && phase === "open" && (
-          <p className="text-xs text-ink-soft">
-            Decisions open after the recruitment deadline. You can read and
-            add notes now.
-          </p>
-        )}
-        {!isFinal && phase === "review" && (
-          <StatusActions app={app} clubSlug={clubSlug} onDone={onClose} />
-        )}
-        {phase === "result" && app.status !== "withdrawn" && app.status !== "removed" && (
-          <p className="text-xs text-ink-soft">
-            Results have been published. This application is locked.
-          </p>
-        )}
-      </div>
+      {/* Decision buttons */}
+      {!isFinal && phase === "review" && (
+        <StatusFlipRow app={app} clubSlug={clubSlug} />
+      )}
+      {isFinal && (
+        <p className="rounded-xl bg-cream px-4 py-3 text-center text-xs text-ink-soft">
+          This application is locked.
+        </p>
+      )}
     </div>
   );
 }
@@ -180,6 +178,76 @@ function ReadBlock({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function StatusFlipRow({
+  app,
+  clubSlug,
+}: {
+  app: AdminApplication;
+  clubSlug: string;
+}) {
+  const [state, formAction] = useActionState<ReviewResult, FormData>(
+    setApplicationStatus,
+    {},
+  );
+
+  return (
+    <form action={formAction} className="space-y-2">
+      <input type="hidden" name="applicationId" value={app.id} />
+      <input type="hidden" name="__club_slug" value={clubSlug} />
+
+      <div className="flex gap-2">
+        <StatusButton
+          value="accepted"
+          label="Accept"
+          className="bg-sport text-sport-fg hover:bg-sport/90"
+          currentStatus={app.status}
+        />
+        <StatusButton
+          value="rejected"
+          label="Reject"
+          className="bg-clay text-clay-fg hover:bg-clay/90"
+          currentStatus={app.status}
+        />
+        <StatusButton
+          value="reviewing"
+          label="Mark reviewing"
+          className="border border-line bg-white text-ink hover:bg-cream"
+          currentStatus={app.status}
+        />
+      </div>
+      {state.error && (
+        <p className="text-center text-xs text-clay">{state.error}</p>
+      )}
+    </form>
+  );
+}
+
+function StatusButton({
+  value,
+  label,
+  className,
+  currentStatus,
+}: {
+  value: ApplicationStatus;
+  label: string;
+  className: string;
+  currentStatus: ApplicationStatus;
+}) {
+  const { pending } = useFormStatus();
+  const isCurrent = currentStatus === value;
+  return (
+    <button
+      type="submit"
+      name="next"
+      value={value}
+      disabled={pending || isCurrent}
+      className={`flex-1 rounded-full px-3 py-2 text-xs font-medium disabled:opacity-50 ${className}`}
+    >
+      {isCurrent ? "✓ " + label : label}
+    </button>
+  );
+}
+
 function NoteForm({
   app,
   clubSlug,
@@ -191,35 +259,67 @@ function NoteForm({
     saveApplicationNote,
     {},
   );
+  const [showHistory, setShowHistory] = React.useState(false);
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const notes = app.notes ?? [];
 
-  const lastUpdated =
-    app.note_at && app.note_author?.full_name
-      ? `Last updated by ${app.note_author.full_name} on ${new Date(app.note_at).toLocaleDateString("en-IN")}`
-      : null;
+  // Reset the textarea after a successful save so the next note starts empty.
+  React.useEffect(() => {
+    if (state.ok && formRef.current) formRef.current.reset();
+  }, [state.ok]);
 
   return (
-    <form action={formAction}>
-      <input type="hidden" name="applicationId" value={app.id} />
-      <input type="hidden" name="__club_slug" value={clubSlug} />
-      <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-ink-soft">
-        Internal note (not visible to the student)
-      </label>
-      <textarea
-        name="note"
-        rows={2}
-        defaultValue={app.note ?? ""}
-        placeholder="Notes for your co-admins…"
-        className="w-full resize-none rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
-      />
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-[10px] text-ink-soft">{lastUpdated ?? ""}</span>
-        <div className="flex items-center gap-2">
+    <div className="space-y-3">
+      <form action={formAction} ref={formRef}>
+        <input type="hidden" name="applicationId" value={app.id} />
+        <input type="hidden" name="__club_slug" value={clubSlug} />
+        <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wide text-ink-soft">
+          Internal note (not visible to the student)
+        </label>
+        <textarea
+          name="note"
+          rows={3}
+          placeholder="Add a new note for your co-admins…"
+          className="w-full resize-none rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
+        />
+        <div className="mt-2 flex items-center justify-end gap-2">
           {state.error && <p className="text-xs text-clay">{state.error}</p>}
           {state.ok && <p className="text-xs text-sport">Note saved.</p>}
           <NoteSave />
         </div>
-      </div>
-    </form>
+      </form>
+
+      {notes.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            className="inline-flex items-center gap-1 text-xs text-ink-soft hover:text-ink"
+          >
+            <IconChevronDown
+              size={12}
+              className={`transition-transform ${showHistory ? "rotate-180" : ""}`}
+            />
+            Previous notes ({notes.length})
+          </button>
+          {showHistory && (
+            <ul className="mt-3 max-h-64 space-y-4 overflow-y-auto border-t border-line pt-3">
+              {notes.map((n) => (
+                <li key={n.id}>
+                  <div className="text-[10px] uppercase tracking-wide text-ink-soft">
+                    * Last updated by {n.author?.full_name ?? "Unknown"} on{" "}
+                    {new Date(n.created_at).toLocaleDateString("en-IN")}
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                    {n.body}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -232,73 +332,6 @@ function NoteSave() {
       className="rounded-full border border-line px-3.5 py-1.5 text-xs text-ink-soft hover:border-ink/40 hover:text-ink disabled:opacity-60"
     >
       {pending ? "Saving…" : "Save note"}
-    </button>
-  );
-}
-
-function StatusActions({
-  app,
-  clubSlug,
-  onDone,
-}: {
-  app: AdminApplication;
-  clubSlug: string;
-  onDone: () => void;
-}) {
-  const [state, formAction] = useActionState<ReviewResult, FormData>(
-    setApplicationStatus,
-    {},
-  );
-
-  React.useEffect(() => {
-    if (state.ok) onDone();
-  }, [state.ok, onDone]);
-
-  const current = app.status;
-  const allowed: ApplicationStatus[] = ["pending", "reviewing", "accepted", "rejected"];
-  const others = allowed.filter((s) => s !== current);
-
-  return (
-    <form action={formAction} className="space-y-2">
-      <input type="hidden" name="applicationId" value={app.id} />
-      <input type="hidden" name="__club_slug" value={clubSlug} />
-      <div className="flex flex-wrap gap-2">
-        {others.map((s) => (
-          <ActionBtn key={s} status={s} />
-        ))}
-      </div>
-      {state.error && (
-        <p className="text-center text-xs text-clay">{state.error}</p>
-      )}
-    </form>
-  );
-}
-
-function ActionBtn({ status }: { status: ApplicationStatus }) {
-  const { pending } = useFormStatus();
-
-  const styles: Record<string, string> = {
-    accepted: "bg-sport text-white hover:bg-sport/90",
-    rejected: "bg-clay text-clay-fg hover:bg-clay/90",
-    reviewing: "bg-indigo text-indigo-fg hover:bg-indigo/90",
-    pending: "border border-line bg-white text-ink hover:bg-cream",
-  };
-  const labels: Record<string, string> = {
-    accepted: "Accept",
-    rejected: "Reject",
-    reviewing: "Mark as reviewing",
-    pending: "Revert to pending",
-  };
-
-  return (
-    <button
-      type="submit"
-      name="next"
-      value={status}
-      disabled={pending}
-      className={`rounded-full px-4 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${styles[status]}`}
-    >
-      {pending ? "…" : labels[status]}
     </button>
   );
 }

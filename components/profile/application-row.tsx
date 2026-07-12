@@ -3,271 +3,175 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
-import Link from "next/link";
+import { IconClock, IconCalendar } from "@tabler/icons-react";
 import { Modal } from "@/components/ui/modal";
 import {
+  updateApplication,
   withdrawApplication,
-  editApplication,
+  type ApplicationResult,
 } from "@/lib/actions/application";
-import { deadlineLabel } from "@/lib/deadline";
 import { getPhase, type Phase } from "@/lib/phase";
+import { targetYearsLabel } from "@/lib/drive-format";
 import type { MyApplication } from "@/lib/queries/profile";
-import type { ApplicationStatus } from "@/lib/database.types";
 
-const STATUS_STYLES: Record<ApplicationStatus, string> = {
-  pending: "bg-beige text-ink-soft",
-  reviewing: "bg-indigo-soft text-indigo",
-  accepted: "bg-sport-soft text-sport",
-  rejected: "bg-clay-soft text-clay",
-  withdrawn: "bg-line text-ink-soft",
-  removed: "bg-clay-soft text-clay",
-};
-const REVIEW_STYLE = "bg-indigo-soft text-indigo";
-
-type Responses = {
-  motivation?: string;
-  experience?: string;
-  contribution?: string;
-};
-
-function displayStatus(
-  app: MyApplication,
-  phase: Phase | null,
-): { label: string; style: string } {
-  if (app.status === "withdrawn")
-    return { label: "Withdrawn", style: STATUS_STYLES.withdrawn };
-  if (app.status === "removed")
-    return { label: "Removed", style: STATUS_STYLES.removed };
-  // 16A: draft shouldn't reach students (the drive is admin-only until
-  // publish, and the trigger blocks applications against drafts). Kept
-  // as a defensive fallback so the pill renders inertly.
-  if (phase === "draft")
-    return { label: "—", style: STATUS_STYLES.pending };
-  if (phase === "review")
-    return { label: "Under review", style: REVIEW_STYLE };
-  const label = app.status.charAt(0).toUpperCase() + app.status.slice(1);
-  return { label, style: STATUS_STYLES[app.status] };
-}
-
+/**
+ * One row in /profile's "My applications" list.
+ * Compact two-line summary. Editing opens a modal so long forms stay isolated
+ * from the surrounding list — matches the pre-16B design.
+ */
 export function ApplicationRow({ app }: { app: MyApplication }) {
-  const [viewOpen, setViewOpen] = React.useState(false);
-  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const phase = app.recruitment ? getPhase(app.recruitment) : null;
+  const questions = app.recruitment?.questions ?? [];
+  const responses = (app.responses ?? {}) as Record<string, string>;
 
-  const phase = getPhase(app.recruitment);
-  const canWithdraw = phase === "open" && app.status === "pending";
-
-  const { label: statusLabel, style: statusStyle } = displayStatus(app, phase);
+  const editable =
+    phase === "open" &&
+    app.status !== "withdrawn" &&
+    app.status !== "removed";
 
   return (
-    <li className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
-      <div className="min-w-0">
-        <Link
-          href={app.club ? `/clubs/${app.club.slug}` : "#"}
-          className="block truncate text-sm font-medium text-ink hover:text-indigo"
+    <li className="rounded-2xl border border-line bg-white p-5">
+      <RowHeader
+        app={app}
+        phase={phase}
+        editable={editable}
+        onEdit={() => setEditing(true)}
+      />
+      {editable && (
+        <Modal
+          open={editing}
+          onClose={() => setEditing(false)}
+          className="max-w-2xl"
         >
-          {app.club?.name ?? "Club"}
-        </Link>
-        <div className="mt-0.5 text-xs text-ink-soft">
-          {app.recruitment?.name && (
-            <>
-              {app.recruitment.name} ·{" "}
-            </>
-          )}
-          {deadlineLabel(app.recruitment?.deadline ?? null)}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <span
-          className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${statusStyle}`}
-        >
-          {statusLabel}
-        </span>
-        <button
-          onClick={() => setViewOpen(true)}
-          className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-ink/40 hover:text-ink"
-        >
-          View
-        </button>
-        {canWithdraw && (
-          <button
-            onClick={() => setConfirmOpen(true)}
-            className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-clay hover:text-clay"
-          >
-            Withdraw
-          </button>
-        )}
-      </div>
-
-      <Modal open={viewOpen} onClose={() => setViewOpen(false)}>
-        <ViewEdit app={app} phase={phase} onDone={() => setViewOpen(false)} />
-      </Modal>
-
-      <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)}>
-        <WithdrawConfirm
-          app={app}
-          onCancel={() => setConfirmOpen(false)}
-          onDone={() => setConfirmOpen(false)}
-        />
-      </Modal>
+          <EditForm
+            app={app}
+            questions={questions}
+            responses={responses}
+            onDone={() => setEditing(false)}
+          />
+        </Modal>
+      )}
     </li>
   );
 }
 
-function ViewEdit({
+function RowHeader({
   app,
   phase,
-  onDone,
+  editable,
+  onEdit,
 }: {
   app: MyApplication;
   phase: Phase | null;
-  onDone: () => void;
+  editable: boolean;
+  onEdit: () => void;
 }) {
-  const r = (app.responses ?? {}) as Responses;
-  const editable = phase === "open" && app.status === "pending";
-  const [editing, setEditing] = React.useState(false);
-  const [state, formAction] = useActionState(editApplication, {});
+  const club = app.club;
+  const rec = app.recruitment;
 
-  React.useEffect(() => {
-    if (state.ok) {
-      setEditing(false);
-      onDone();
-    }
-  }, [state.ok, onDone]);
-
-  if (editing) {
-    return (
-      <form action={formAction} className="space-y-4">
-        <input type="hidden" name="applicationId" value={app.id} />
-        <h3 className="font-display text-lg font-bold text-ink">Edit application</h3>
-        <Q name="motivation" label="Why do you want to join?" defaultValue={r.motivation ?? ""} required />
-        <Q name="experience" label="Relevant experience or skills" defaultValue={r.experience ?? ""} />
-        <Q name="contribution" label="What can you contribute?" defaultValue={r.contribution ?? ""} required />
-        {state.error && <p className="text-center text-xs text-clay">{state.error}</p>}
-        <div className="flex gap-2">
-          <SaveBtn />
-          <button
-            type="button"
-            onClick={() => setEditing(false)}
-            className="rounded-full border border-line px-5 py-2.5 text-sm text-ink hover:bg-cream"
-          >
-            Cancel
-          </button>
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate font-display text-lg font-bold text-ink">
+          {club?.name ?? "Club"}
+        </h3>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-soft">
+          {rec?.name && <span className="font-medium">{rec.name}</span>}
+          {rec?.target_years && rec.target_years.length > 0 && (
+            <span className="rounded-full bg-beige px-2 py-0.5">
+              For {targetYearsLabel(rec.target_years)}
+            </span>
+          )}
+          {rec?.deadline && phase === "open" && (
+            <span className="inline-flex items-center gap-1">
+              <IconClock size={11} /> Closes{" "}
+              {new Date(rec.deadline).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+              })}
+            </span>
+          )}
+          {rec?.result_date && phase === "review" && (
+            <span className="inline-flex items-center gap-1">
+              <IconCalendar size={11} /> Results by{" "}
+              {new Date(rec.result_date).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+              })}
+            </span>
+          )}
         </div>
-      </form>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <h3 className="font-display text-lg font-bold text-ink">{app.club?.name ?? "Application"}</h3>
-      <Read label="Why do you want to join?" value={r.motivation} />
-      <Read label="Relevant experience or skills" value={r.experience} />
-      <Read label="What can you contribute?" value={r.contribution} />
-
-      {editable ? (
-        <button
-          onClick={() => setEditing(true)}
-          className="w-full rounded-full bg-indigo px-6 py-2.5 text-sm font-medium text-indigo-fg hover:bg-indigo/90"
-        >
-          Edit application
-        </button>
-      ) : (
-        <p className="text-center text-xs text-ink-soft">
-          {phase === "review"
-            ? "Your application is under review and can't be edited."
-            : phase === "result"
-              ? "Results are out — this application is locked."
-              : "This application can no longer be edited."}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function Read({ label, value }: { label: string; value?: string }) {
-  return (
-    <div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-soft">{label}</div>
-      <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{value || "—"}</p>
-    </div>
-  );
-}
-
-function Q({
-  name,
-  label,
-  defaultValue,
-  required,
-}: {
-  name: string;
-  label: string;
-  defaultValue: string;
-  required?: boolean;
-}) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-sm font-medium text-ink">
-        {label} {required && <span className="text-clay">*</span>}
-      </label>
-      <textarea
-        name={name}
-        rows={3}
-        defaultValue={defaultValue}
-        required={required}
-        className="w-full resize-none rounded-xl border border-line bg-white p-3 text-sm text-ink outline-none focus:border-indigo"
-      />
-    </div>
-  );
-}
-
-function SaveBtn() {
-  const { pending } = useFormStatus();
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="rounded-full bg-indigo px-6 py-2.5 text-sm font-medium text-indigo-fg hover:bg-indigo/90 disabled:opacity-60"
-    >
-      {pending ? "Saving…" : "Save changes"}
-    </button>
-  );
-}
-
-function WithdrawConfirm({
-  app,
-  onCancel,
-  onDone,
-}: {
-  app: MyApplication;
-  onCancel: () => void;
-  onDone: () => void;
-}) {
-  const [state, formAction] = useActionState(withdrawApplication, {});
-  React.useEffect(() => {
-    if (state.ok) onDone();
-  }, [state.ok, onDone]);
-
-  return (
-    <form action={formAction} className="space-y-4">
-      <input type="hidden" name="applicationId" value={app.id} />
-      <h3 className="font-display text-lg font-bold text-ink">Withdraw application?</h3>
-      <p className="text-sm text-ink-soft">
-        You can re-apply to {app.club?.name ?? "this club"} any time before the deadline.
-        After the deadline, the application stays withdrawn and cannot be reopened —
-        you may contact the club lead for queries.
-      </p>
-      {state.error && <p className="text-center text-xs text-clay">{state.error}</p>}
-      <div className="flex gap-2">
-        <WithdrawBtn />
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-full border border-line px-5 py-2.5 text-sm text-ink hover:bg-cream"
-        >
-          Keep it
-        </button>
       </div>
+
+      <div className="flex flex-shrink-0 items-center gap-1.5">
+        <StatusPill
+          status={app.status}
+          resultsPublishedAt={rec?.results_published_at ?? null}
+        />
+        {editable && (
+          <>
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded-full bg-indigo px-3 py-1.5 text-xs font-medium text-indigo-fg hover:bg-indigo/90"
+            >
+              Edit
+            </button>
+            <WithdrawPill applicationId={app.id} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatusPill({
+  status,
+  resultsPublishedAt,
+}: {
+  status: string;
+  resultsPublishedAt: string | null;
+}) {
+  // Mask accepted/rejected as "Under review" until results are officially
+  // published. Phase-based masking would leak decisions if a lead extends
+  // the deadline (review → open round-trip); publication-based masking is
+  // stable across those transitions.
+  const displayStatus =
+    !resultsPublishedAt && (status === "accepted" || status === "rejected")
+      ? "reviewing"
+      : status;
+
+  const styles: Record<string, string> = {
+    pending: "bg-beige text-ink-soft",
+    reviewing: "bg-indigo-soft text-indigo",
+    accepted: "bg-sport-soft text-sport",
+    rejected: "bg-clay-soft text-clay",
+    withdrawn: "bg-line text-ink-soft",
+    removed: "bg-clay-soft text-clay",
+  };
+
+  return (
+    <span
+      className={`rounded-full px-3 py-1.5 text-xs font-medium capitalize ${styles[displayStatus] ?? "bg-beige text-ink-soft"}`}
+    >
+      {displayStatus === "reviewing" ? "Under review" : displayStatus}
+    </span>
+  );
+}
+
+function WithdrawPill({ applicationId }: { applicationId: string }) {
+  const [state, formAction] = useActionState<ApplicationResult, FormData>(
+    withdrawApplication,
+    {},
+  );
+  return (
+    <form action={formAction} className="inline-flex items-center">
+      <input type="hidden" name="applicationId" value={applicationId} />
+      <WithdrawBtn />
+      {state.error && (
+        <span className="ml-2 text-[10px] text-clay">{state.error}</span>
+      )}
     </form>
   );
 }
@@ -278,9 +182,145 @@ function WithdrawBtn() {
     <button
       type="submit"
       disabled={pending}
-      className="rounded-full bg-clay px-6 py-2.5 text-sm font-medium text-clay-fg hover:bg-clay/90 disabled:opacity-60"
+      className="rounded-full border border-clay/40 bg-white px-3 py-1.5 text-xs font-medium text-clay hover:bg-clay/5 disabled:opacity-60"
     >
-      {pending ? "Withdrawing…" : "Yes, withdraw"}
+      {pending ? "…" : "Withdraw"}
+    </button>
+  );
+}
+
+function EditForm({
+  app,
+  questions,
+  responses,
+  onDone,
+}: {
+  app: MyApplication;
+  questions: MyApplication["recruitment"] extends infer R
+    ? R extends { questions: infer Q }
+      ? Q
+      : never
+    : never;
+  responses: Record<string, string>;
+  onDone: () => void;
+}) {
+  const [state, formAction] = useActionState<ApplicationResult, FormData>(
+    updateApplication,
+    {},
+  );
+
+  React.useEffect(() => {
+    if (state.ok) onDone();
+  }, [state.ok, onDone]);
+
+  const clubName = app.club?.name ?? "Club";
+  const driveName = app.recruitment?.name ?? null;
+
+  return (
+    <div>
+      <h3 className="mb-1 font-display text-lg font-bold text-ink">
+        Edit application
+      </h3>
+      <p className="mb-5 text-xs text-ink-soft">
+        {clubName}
+        {driveName && <> · {driveName}</>}
+      </p>
+
+      <form action={formAction} className="space-y-4">
+        <input type="hidden" name="applicationId" value={app.id} />
+
+        {(
+          questions as Array<{
+            id: string;
+            prompt: string;
+            sort_order: number;
+            question_type: "short_text" | "long_text";
+            required: boolean;
+          }>
+        )
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((q) => (
+            <Q
+              key={q.id}
+              name={`q_${q.id}`}
+              label={q.prompt}
+              defaultValue={responses[q.id] ?? ""}
+              required={q.required}
+              isShort={q.question_type === "short_text"}
+            />
+          ))}
+
+        {state.error && (
+          <p className="text-center text-xs text-clay">{state.error}</p>
+        )}
+
+        <div className="flex gap-2 pt-2">
+          <SaveBtn />
+          <button
+            type="button"
+            onClick={onDone}
+            className="rounded-full border border-line px-5 py-2.5 text-sm text-ink hover:bg-cream"
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function Q({
+  name,
+  label,
+  defaultValue,
+  required,
+  isShort,
+}: {
+  name: string;
+  label: string;
+  defaultValue: string;
+  required?: boolean;
+  isShort: boolean;
+}) {
+  const maxLength = isShort ? 250 : 2000;
+  return (
+    <div>
+      <label className="mb-1.5 block text-sm font-medium text-ink">
+        {label} {required && <span className="text-clay">*</span>}
+      </label>
+      {isShort ? (
+        <input
+          type="text"
+          name={name}
+          defaultValue={defaultValue}
+          required={required}
+          maxLength={maxLength}
+          className="w-full rounded-xl border border-line bg-white p-3 text-sm text-ink outline-none focus:border-indigo"
+        />
+      ) : (
+        <textarea
+          name={name}
+          rows={3}
+          defaultValue={defaultValue}
+          required={required}
+          maxLength={maxLength}
+          className="w-full resize-none rounded-xl border border-line bg-white p-3 text-sm text-ink outline-none focus:border-indigo"
+        />
+      )}
+    </div>
+  );
+}
+
+function SaveBtn() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="flex-1 rounded-full bg-indigo px-6 py-2.5 text-sm font-medium text-indigo-fg hover:bg-indigo/90 disabled:opacity-60"
+    >
+      {pending ? "Saving…" : "Save changes"}
     </button>
   );
 }

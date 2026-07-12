@@ -44,14 +44,19 @@ export function DriveListRow({
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-4">
-        <div className="text-center">
-          <div className="inline-flex items-center gap-1 text-lg font-bold text-ink">
+        <div className="text-right">
+          <div className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
             <IconUsers size={14} className="text-ink-soft" />
-            {drive.applicant_count}
+            <span>
+              {drive.applicant_count} applicant
+              {drive.applicant_count === 1 ? "" : "s"}
+            </span>
           </div>
-          <div className="text-[10px] uppercase tracking-wide text-ink-soft">
-            applicant{drive.applicant_count === 1 ? "" : "s"}
-          </div>
+          {drive.pending_count > 0 && (
+            <div className="mt-0.5 text-xs text-clay">
+              {drive.pending_count} pending
+            </div>
+          )}
         </div>
 
         <Link

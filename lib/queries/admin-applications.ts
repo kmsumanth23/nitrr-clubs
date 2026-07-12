@@ -6,6 +6,13 @@ import type {
   ApplicationStatus,
 } from "@/lib/database.types";
 
+export interface ApplicationNote {
+  id: string;
+  body: string;
+  created_at: string;
+  author: { full_name: string | null } | null;
+}
+
 export interface AdminApplication extends Application {
   applicant:
     | (Pick<
@@ -13,6 +20,9 @@ export interface AdminApplication extends Application {
         "id" | "full_name" | "email" | "roll_number" | "year" | "branch"
       > | null);
   note_author?: Pick<Profile, "full_name"> | null;
+  /** 16B-addendum: append-only note history, newest first. Populated only by
+   *  `getApplicationsForDrive`; other queries leave it undefined. */
+  notes?: ApplicationNote[];
 }
 
 export interface RecruitmentForAdmin {
@@ -257,17 +267,54 @@ export async function getApplicationsForDrive(
 
   const applications = (appsData ?? []) as AdminApplication[];
 
+  // Fetch note history for all applications in one shot, then stitch onto rows.
+  // Separate query rather than an embedded join so RLS on applications and
+  // application_notes evaluate independently and the shape stays predictable.
+  const appIds = applications.map((a) => a.id);
+  const notesByAppId = new Map<string, ApplicationNote[]>();
+  if (appIds.length > 0) {
+    const { data: noteRows, error: notesErr } = await supabase
+      .from("application_notes")
+      .select(
+        `id, application_id, body, created_at,
+         author:profiles!application_notes_author_id_fkey(full_name)`,
+      )
+      .in("application_id", appIds)
+      .order("created_at", { ascending: false });
+    if (notesErr) {
+      console.error("getApplicationsForDrive notes fetch failed:", notesErr);
+      throw notesErr;
+    }
+    for (const raw of noteRows ?? []) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const n = raw as any;
+      const list = notesByAppId.get(n.application_id) ?? [];
+      list.push({
+        id: n.id,
+        body: n.body,
+        created_at: n.created_at,
+        author: n.author ?? null,
+      });
+      notesByAppId.set(n.application_id, list);
+    }
+  }
+
+  const enriched: AdminApplication[] = applications.map((a) => ({
+    ...a,
+    notes: notesByAppId.get(a.id) ?? [],
+  }));
+
   const counts: Record<string, number> = {
-    all: applications.length,
+    all: enriched.length,
     pending: 0, reviewing: 0, accepted: 0,
     rejected: 0, withdrawn: 0, removed: 0,
   };
-  for (const a of applications)
+  for (const a of enriched)
     counts[a.status] = (counts[a.status] ?? 0) + 1;
 
   return {
     drive,
-    applications,
+    applications: enriched,
     counts: counts as Record<ApplicationStatus | "all", number>,
   };
 }
