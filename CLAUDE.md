@@ -382,6 +382,8 @@ For archived clubs: sysadmin can still access all sub-pages (sees existing "deco
 | **17** | TBD candidates: event RSVP/attendance, recruitment workflow improvements (interview slots), member badges |
 | **18** | Post-deploy P0/P1 security fixes (profile-search filter injection, signout GET→POST, signup flow, email verification landing) |
 | **19** | UI/UX pass (Radix Dialog migration, `loading.tsx` segments, lightbox a11y, mobile redesigns, `window.location.reload()` migration, accent color decision) |
+| **20** | Post-16 maintenance sweep: drop `updateRecruitment` / `startNewRecruitment` / `getApplicationHistoryForClub` / `RecruitmentHistoryGroup`; drop `applications.note` / `note_by` / `note_at` columns + FK; drop `clubs.is_recruiting` if not folded into 16d. Guarded by grep sweep before removal. |
+| **21** | Question-edit data integrity (data-integrity, not UX): during a review→open deadline-extension roundtrip, admins can edit question prompts with existing responses attached — silent misalignment. Fix: snapshot each `q.prompt` onto `applications.responses[q_id]` at submit-time so the review UI can always render "response to: `<original prompt>`" even after edits. Pair with the deferred applicant-notification-on-drive-edit feature. |
 
 ---
 
@@ -592,6 +594,10 @@ Features and improvements surfaced during step 14 but pushed forward. Single sou
 |---|---|
 | Email notifications via Resend | step 15 |
 | Year-restricted positions + WhatsApp reveals | step 16 |
+| Question-prompt snapshot on responses (data-integrity) | step 21 |
+| Applicant notification on drive edit | step 21 |
+| Drop `applications.note` / `note_by` / `note_at` (frozen post-16B) | step 20 |
+| Drop dead `updateRecruitment` / `startNewRecruitment` / `getApplicationHistoryForClub` | step 20 |
 | Modal pattern refactor (useActionState+useEffect) | step 19 |
 | `loading.tsx` route segments | step 19 |
 | Modal a11y (focus trap, aria, Esc) | step 19 |

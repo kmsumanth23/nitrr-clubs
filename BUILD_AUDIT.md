@@ -1105,5 +1105,48 @@ Followups from the review-phase soft-gate work:
    - Cancel → modal closes, no writes.
    - Multiple applications: editing one does not expand siblings.
 
+---
+
+## 16B — Addendum 4 (legacy-note SELECT strip + deferred catalog update)
+
+Pre-16C hygiene pass in response to an audit request.
+
+### Grep sweep
+
+```bash
+grep -rn "\.note\b\|note_by\|note_at\|note_author" \
+  lib/ components/ app/ --include="*.ts" --include="*.tsx" \
+  | grep -v "application_notes\|node_modules\|.next\|database.types.ts"
+```
+
+- Pre-strip: 3 hits (all `note_author:profiles!applications_note_by_fkey(full_name)` embedded joins in `admin-applications.ts` SELECTs).
+- **Consumer-side grep** for `.note`, `.note_author`, `.note_at`, `.note[^s]`: **zero hits.** No live code was reading the joined result — the queries pulled bytes over the wire and dropped them.
+- Post-strip: zero hits.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | Removed the embedded `note_author:profiles!applications_note_by_fkey(full_name)` from all three SELECTs (`getApplicationsForClub`, `getApplicationHistoryForClub`, `getApplicationsForDrive`). Removed `note_author?: Pick<Profile, "full_name"> \| null` from `AdminApplication` interface. |
+
+Behavior unchanged. Just eliminates wasted joins and makes `applications.note*` columns visibly unreferenced in application code.
+
+### Roadmap updates ([CLAUDE.md](CLAUDE.md))
+
+Formalized the maintenance sweep + question-integrity work as real steps:
+
+- **Step 20 — Post-16 maintenance sweep**: drop dead symbols (`updateRecruitment`, `startNewRecruitment`, `getApplicationHistoryForClub`, `RecruitmentHistoryGroup`) + drop `applications.note` / `note_by` / `note_at` columns + FK. Guarded by a grep sweep before each removal.
+- **Step 21 — Question-edit data-integrity**: snapshot each `q.prompt` onto `applications.responses[q_id]` at submit-time so the review UI can render "response to: `<original prompt>`" even after edits. Guards against the review→open deadline-extension roundtrip where question prompts become editable while old responses are still attached. Pair with the deferred applicant-notification-on-drive-edit feature.
+
+Also added to the "Going to specific future steps" table so the deferred catalog reflects the new step assignments.
+
+### Verification
+
+- Consumer-side grep — zero hits.
+- `npx tsc --noEmit` — clean.
+- No behavior change on the applications page (was already using the new `notes[]` array, not the legacy `note_author` field).
+
+Ready for 16C.
+
 
 

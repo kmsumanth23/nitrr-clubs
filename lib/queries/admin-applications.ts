@@ -19,7 +19,6 @@ export interface AdminApplication extends Application {
         Profile,
         "id" | "full_name" | "email" | "roll_number" | "year" | "branch"
       > | null);
-  note_author?: Pick<Profile, "full_name"> | null;
   /** 16B-addendum: append-only note history, newest first. Populated only by
    *  `getApplicationsForDrive`; other queries leave it undefined. */
   notes?: ApplicationNote[];
@@ -57,8 +56,7 @@ export async function getApplicationsForClub(
     .from("applications")
     .select(
       `*,
-       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch),
-       note_author:profiles!applications_note_by_fkey(full_name)`,
+       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch)`,
     )
     .eq("recruitment_id", rec.id)
     .order("created_at", { ascending: false });
@@ -130,8 +128,7 @@ export async function getApplicationHistoryForClub(
     .from("applications")
     .select(
       `*,
-       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch),
-       note_author:profiles!applications_note_by_fkey(full_name)`,
+       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch)`,
     )
     .in("recruitment_id", priorIds)
     .order("created_at", { ascending: false });
@@ -258,8 +255,7 @@ export async function getApplicationsForDrive(
     .from("applications")
     .select(
       `*,
-       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch),
-       note_author:profiles!applications_note_by_fkey(full_name)`,
+       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch)`,
     )
     .eq("recruitment_id", driveId)
     .order("created_at", { ascending: false });
