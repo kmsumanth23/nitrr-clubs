@@ -51,6 +51,7 @@ export async function createDrive(
     ),
     deadline: (formData.get("deadline") as string) ?? "",
     resultDate: (formData.get("resultDate") as string) ?? "",
+    interviewWhatsappLink: formData.get("interviewWhatsappLink") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -65,6 +66,7 @@ export async function createDrive(
     target_years_in: parsed.data.targetYears,
     deadline_in: parsed.data.deadline,
     result_date_in: parsed.data.resultDate,
+    interview_whatsapp_link_in: parsed.data.interviewWhatsappLink, // 16C
   } as never);
   if (error) {
     console.error("createDrive rpc failed:", error);
@@ -111,6 +113,7 @@ export async function updateDrive(
     ),
     deadline: (formData.get("deadline") as string) ?? "",
     resultDate: (formData.get("resultDate") as string) ?? "",
+    interviewWhatsappLink: formData.get("interviewWhatsappLink") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -123,6 +126,7 @@ export async function updateDrive(
     target_years_in: parsed.data.targetYears,
     deadline_in: parsed.data.deadline,
     result_date_in: parsed.data.resultDate,
+    interview_whatsapp_link_in: parsed.data.interviewWhatsappLink, // 16C
   } as never);
   if (error) {
     console.error("updateDrive rpc failed:", error);

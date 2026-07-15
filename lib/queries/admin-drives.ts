@@ -31,6 +31,7 @@ export interface DriveWithQuestions {
   result_date: string | null;
   published_at: string | null;
   results_published_at: string | null;
+  interview_whatsapp_link: string | null; // 16C
   created_at: string;
   phase: Phase;
   questions: DriveQuestion[];
@@ -125,7 +126,7 @@ export async function getDriveWithQuestions(
     .from("recruitments")
     .select(
       `id, club_id, name, description, target_years, deadline, result_date,
-       published_at, results_published_at, created_at,
+       published_at, results_published_at, interview_whatsapp_link, created_at,
        drive_questions(id, prompt, question_type, sort_order, required)`,
     )
     .eq("id", driveId)
@@ -159,6 +160,7 @@ export async function getDriveWithQuestions(
     result_date: r.result_date,
     published_at: r.published_at,
     results_published_at: r.results_published_at,
+    interview_whatsapp_link: r.interview_whatsapp_link ?? null, // 16C
     created_at: r.created_at,
     phase,
     questions: (r.drive_questions ?? []).map(

@@ -75,6 +75,11 @@ export function DriveEditorForm({
   const [resultDate, setResultDate] = React.useState<string>(
     drive?.result_date ? toLocalInputValue(drive.result_date) : "",
   );
+  // 16C: mandatory interview WhatsApp link. Backfilled drives may be null;
+  // the banner below warns admins in that case.
+  const [interviewLink, setInterviewLink] = React.useState<string>(
+    drive?.interview_whatsapp_link ?? "",
+  );
 
   const [dirty, setDirty] = React.useState(false);
   const [publishOpen, setPublishOpen] = React.useState(false);
@@ -113,8 +118,14 @@ export function DriveEditorForm({
   if (!name.trim()) publishMissing.push("name");
   if (targetYears.length === 0) publishMissing.push("target years");
   if (!deadline) publishMissing.push("deadline");
+  if (!interviewLink.trim()) publishMissing.push("interview WhatsApp link"); // 16C
   if (isEdit && questionCount === 0) publishMissing.push("at least one question");
   const canPublish = publishMissing.length === 0;
+
+  // 16C: backfill warning — pre-16C drives may have null interview_whatsapp_link.
+  // Show a soft banner in edit mode until the field is filled + saved.
+  const showBackfillBanner =
+    isEdit && !drive?.interview_whatsapp_link && !readOnly;
 
   return (
     <div className="space-y-6">
@@ -140,6 +151,23 @@ export function DriveEditorForm({
               Results published — this drive is frozen.
             </p>
           )}
+        </div>
+      )}
+
+      {/* 16C: backfill banner for pre-16C drives with null interview link. */}
+      {showBackfillBanner && (
+        <div className="flex items-start gap-2 rounded-2xl border border-clay/30 bg-clay/5 p-4 text-sm">
+          <IconAlertTriangle
+            size={14}
+            className="mt-0.5 flex-shrink-0 text-clay"
+          />
+          <div>
+            <p className="font-medium text-clay">Interview link required</p>
+            <p className="mt-0.5 text-xs text-ink-soft">
+              This drive was created before interview links were required. Add
+              one before saving further changes.
+            </p>
+          </div>
         </div>
       )}
 
@@ -201,6 +229,27 @@ export function DriveEditorForm({
                 placeholder="Optional context students see on the apply page."
                 className="w-full resize-none rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:bg-cream/40 disabled:text-ink-soft"
               />
+            </div>
+
+            {/* 16C: mandatory interview WhatsApp link */}
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-ink">
+                Interview WhatsApp link <span className="text-clay">*</span>
+              </label>
+              <input
+                name="interviewWhatsappLink"
+                type="url"
+                value={interviewLink}
+                onChange={(e) => setInterviewLink(e.target.value)}
+                disabled={readOnly}
+                placeholder="https://chat.whatsapp.com/..."
+                required
+                className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:bg-cream/40 disabled:text-ink-soft"
+              />
+              <p className="mt-1.5 text-[11px] text-ink-soft">
+                Revealed to applicants after they apply — used for interview
+                coordination.
+              </p>
             </div>
 
             <div>
@@ -362,13 +411,15 @@ export function DriveEditorForm({
                       isPending ||
                       !name.trim() ||
                       targetYears.length === 0 ||
-                      !deadline
+                      !deadline ||
+                      !interviewLink.trim()
                     }
                     title={
                       !name.trim() ||
                       targetYears.length === 0 ||
-                      !deadline
-                        ? "To publish immediately: fill name, target years, and deadline first"
+                      !deadline ||
+                      !interviewLink.trim()
+                        ? "To publish immediately: fill name, target years, deadline, and interview WhatsApp link first"
                         : "Save this drive and open applications right away"
                     }
                     className="inline-flex items-center gap-1.5 rounded-full bg-indigo px-5 py-2.5 text-sm font-medium text-indigo-fg hover:bg-indigo/90 disabled:cursor-not-allowed disabled:opacity-50"

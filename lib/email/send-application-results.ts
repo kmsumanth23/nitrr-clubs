@@ -26,11 +26,14 @@ export async function sendApplicationResultEmails(
     failures: [],
   };
 
-  // Fetch applications + applicant profile + club info in one query
+  // Fetch applications + applicant profile + club info in one query.
+  // Must disambiguate the profiles embed — `applications` has two FKs to
+  // `profiles` (profile_id + legacy note_by), so an auto-inferred embed
+  // fails with PGRST201. Force the applicant FK explicitly.
   const { data, error } = await supabase
     .from("applications")
     .select(
-      "status, profile:profiles(email, full_name), club:clubs(name, slug)",
+      "status, profile:profiles!applications_profile_id_fkey(email, full_name), club:clubs(name, slug)",
     )
     .eq("recruitment_id", recruitmentId)
     .in("status", ["accepted", "rejected"]);

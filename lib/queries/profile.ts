@@ -16,6 +16,7 @@ export interface MyApplication extends Application {
     results_published_at: string | null;
     target_years: number[]; // 16B
     published_at: string | null; // 16A
+    interview_whatsapp_link: string | null; // 16C
     questions: DriveQuestion[]; // 16B — sorted by sort_order
   } | null;
   club: (Pick<Club, "name" | "slug"> & { category: Category | null }) | null;
@@ -25,7 +26,7 @@ export interface MyMembership {
   club_id: string;
   joined_at: string;
   club:
-    | (Pick<Club, "name" | "slug" | "archived_at"> & {
+    | (Pick<Club, "name" | "slug" | "archived_at" | "community_whatsapp_link"> & {
         category: Category | null;
       })
     | null;
@@ -64,6 +65,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
       `*,
        recruitment:recruitments(
          id, name, deadline, result_date, results_published_at, target_years, published_at,
+         interview_whatsapp_link,
          club:clubs(name, slug, category:categories(*)),
          drive_questions(id, prompt, question_type, sort_order, required)
        )`,
@@ -86,6 +88,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
         results_published_at: string | null;
         target_years: number[];
         published_at: string | null;
+        interview_whatsapp_link: string | null;
         club: { name: string; slug: string; archived_at: string | null; category: Category | null } | null;
         drive_questions: DriveQuestion[] | null;
       } | null;
@@ -101,6 +104,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
           results_published_at: a.recruitment.results_published_at,
           target_years: a.recruitment.target_years ?? [1, 2, 3, 4],
           published_at: a.recruitment.published_at,
+          interview_whatsapp_link: a.recruitment.interview_whatsapp_link ?? null, // 16C
           questions: a.recruitment.drive_questions ?? [],
         }
       : null,
@@ -238,7 +242,9 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
   if (!user) return [];
   const { data, error } = await supabase
     .from("club_members")
-    .select("club_id, joined_at, club:clubs(name, slug, archived_at, category:categories(*))")
+    .select(
+      "club_id, joined_at, club:clubs(name, slug, community_whatsapp_link, archived_at, category:categories(*))",
+    )
     .eq("profile_id", user.id)
     .order("joined_at", { ascending: false });
   if (error) throw error;

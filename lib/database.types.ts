@@ -745,6 +745,7 @@ export type Database = {
           club_id_in: string
           deadline_in: string
           description_in: string
+          interview_whatsapp_link_in: string
           name_in: string
           result_date_in: string
           target_years_in: number[]
@@ -861,6 +862,7 @@ export type Database = {
           deadline_in: string
           description_in: string
           drive_id_in: string
+          interview_whatsapp_link_in: string
           name_in: string
           result_date_in: string
           target_years_in: number[]

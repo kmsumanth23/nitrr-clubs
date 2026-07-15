@@ -1148,5 +1148,142 @@ Also added to the "Going to specific future steps" table so the deferred catalog
 
 Ready for 16C.
 
+---
+
+# 16C Batch 1 — Server + schema + WhatsApp popup component
+
+Shipping in 2 batches. This batch: SQL migration + all query/action/validation/type patches + reusable popup component. Batch 2 wires it into 4 UI surfaces.
+
+## Files moved (drop-folder → destinations)
+
+| Origin (files (5)/) | Destination |
+|---|---|
+| `16c_mandatory_interview_link.sql` | [supabase/16c_mandatory_interview_link.sql](supabase/16c_mandatory_interview_link.sql) |
+| `whatsapp-link-popup.tsx` | [components/ui/whatsapp-link-popup.tsx](components/ui/whatsapp-link-popup.tsx) |
+
+Both moved (not copied) per instructions. Patch `.md` files left in the drop folder as reference — they're consumed guidance, not deliverables.
+
+## Files patched
+
+| File | Change |
+|---|---|
+| [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | Added `interview_whatsapp_link: string \| null` to `DriveWithQuestions` interface + SELECT + mapper in `getDriveWithQuestions`. `DriveListItem` intentionally left alone — Batch 2 surfaces don't consume it there. |
+| [lib/validation/drive.ts](lib/validation/drive.ts) | Added `whatsappLinkSchema` (trim + min 1 + max 500 + `^https?://` regex refinement). Added `interviewWhatsappLink: whatsappLinkSchema` to both `createDriveSchema` and `updateDriveSchema`. |
+| [lib/actions/drive.ts](lib/actions/drive.ts) | `createDrive` + `updateDrive` both now read `formData.get("interviewWhatsappLink")` into the parse block and pass `interview_whatsapp_link_in` to the RPC. `as never` cast pattern preserved (RPC types stale until Supabase regen). |
+| [lib/queries/profile.ts](lib/queries/profile.ts) | Added `interview_whatsapp_link: string \| null` to `MyApplication.recruitment` + intermediate cast + mapper. Extended `getMyApplications` SELECT to include the column. Added `community_whatsapp_link` to `MyMembership.club` `Pick<>` and to `getMyMemberships` SELECT. |
+| [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | Added controlled `interviewLink` state seeded from `drive?.interview_whatsapp_link ?? ""`. New "Interview WhatsApp link" `<input type="url" name="interviewWhatsappLink">` in Section 1 between description and target years. Backfill banner (clay-tinted) shown when `isEdit && !drive?.interview_whatsapp_link && !readOnly`. `publishMissing` extended with "interview WhatsApp link". Create-mode "Save & Publish" disabled + tooltip updated. |
+
+## Verifications done
+
+**Grep sweep — RPC callers of the changed signatures** (must be exactly one hit each, both in the file being patched):
+
+```bash
+grep -rn "\.rpc(\"create_drive\"\|\.rpc(\"update_drive\"" lib/ app/ --include="*.ts" --include="*.tsx"
+# 2 hits, both in lib/actions/drive.ts (lines 61, 119) ✓
+```
+
+**Grep sweep — `community_whatsapp_link` in generated types** (clubs.ts patch verification):
+
+```bash
+grep -c "community_whatsapp_link" lib/database.types.ts
+# 3 (Row + Insert + Update on clubs table) ✓
+```
+
+Result: `ClubDetail.community_whatsapp_link` already flows through as `string | null`. No `clubs.ts` code change needed — the patch spec correctly identified this as verify-only.
+
+**Typecheck**: `npx tsc --noEmit` — clean.
+
+## Locked design decisions (from SETUP)
+
+- **Interview link reveal:** `!results_published_at && status NOT IN (withdrawn, removed)` — any non-withdrawn/non-removed applicant sees the link across Open + Review. Hidden post-publish.
+- **Community link reveal:** authenticated user is in `club_members` for that club (publish gate materializes membership).
+- **Mandatory interview link at drive creation:** enforced at three layers — Zod schema (client), server action, RPC + publish RPC. Existing pre-16C drives with null link get the backfill banner in the editor and are blocked from being edited until a link is added.
+- **Popup:** WhatsApp icon button → modal with Join group + Copy link. Reusable across surfaces.
+
+## Coexistence trap noted
+
+**`create_drive` + `update_drive` RPC signatures changed from 6 → 7 params.** The migration uses `drop function if exists` on the old 6-param signatures first, then `create or replace` the new 7-param ones. Idempotent. Grants re-issued with the new signatures.
+
+**Existing drives with `interview_whatsapp_link IS NULL`** stay in the DB. Any admin edit via `update_drive` will now be rejected with "Interview WhatsApp link is required." until they populate the field. This is Option A from the SETUP (force fill on next save) — the recommended path.
+
+**Stale generated types on the RPC**: `create_drive` + `update_drive` in `database.types.ts` still reflect the 6-param signature until Supabase regen runs. The `as never` cast on the args object bypasses the mismatch, matching the pattern already used in this file and in `recruitment.ts` (`startNewRecruitment`).
+
+## What Batch 1 does NOT touch
+
+- Any student-facing UI wiring (Batch 2)
+- Profile page memberships integration
+- Club detail page community link surface
+- Apply page guide text
+- Question editing lock during review→open (deferred to step 21)
+- `DriveListItem` interface extension (Batch 2 doesn't need it there)
+
+## Smoke test after Batch 1 (apply SQL first)
+
+1. **New drive without interview link** → Zod blocks: "Interview WhatsApp link is required."
+2. **New drive with interview link** → succeeds, lands in editor with `published_at = null`.
+3. **Edit an existing (pre-16C) drive** → backfill banner shown, `publishMissing` includes "interview WhatsApp link" until filled + saved.
+4. **Publish gate**: publish button/action refuses without interview link. Client + server + DB all reject.
+5. **Popup component** — isolated; not testable until Batch 2 wires it into a surface.
+
+Say "Batch 1 clean" and Batch 2 (4 UI integration surfaces) ships next.
+
+---
+
+## 16C Batch 1 — Side fix (email disambiguation, PGRST201)
+
+Surfaced during a publish-results smoke test. **Not a 16C regression** — pre-existing bug from step 15a that only bit now.
+
+### Symptom
+
+```
+sendApplicationResultEmails: failed to fetch applications: {
+  code: 'PGRST201',
+  hint: "Try changing 'profiles' to one of the following: 'profiles!applications_note_by_fkey', 'profiles!applications_profile_id_fkey'"
+}
+publish_results emails: 0/0 sent; 0 failed
+```
+
+Publish RPC succeeded (results committed, memberships materialized, `results_published_at` set). Only the email loop failed at the SELECT step, so accepted/rejected applicants for that publish did **not** receive their result emails.
+
+### Root cause
+
+[lib/email/send-application-results.ts:33](lib/email/send-application-results.ts#L33) embedded profiles as `profile:profiles(email, full_name)` — auto-inferred. `applications` has two FKs to `profiles`:
+
+- `applications_profile_id_fkey` (the applicant)
+- `applications_note_by_fkey` (legacy note author, from 09b_review_phases)
+
+PostgREST refuses to guess when there's more than one candidate. The bug has existed since 15a; publish_results paths just weren't exercised in tests that had actual accepted/rejected applicants until this session.
+
+### Fix
+
+One-line disambiguation — force the applicant FK explicitly:
+
+```ts
+"status, profile:profiles!applications_profile_id_fkey(email, full_name), club:clubs(name, slug)"
+```
+
+### Sweep
+
+```bash
+grep -rn "profiles(" lib/ app/ --include="*.ts" --include="*.tsx" \
+  | grep -v ".next\|node_modules\|database.types.ts\|profiles!"
+```
+
+Only 1 hit — the file we just fixed. Every other consumer already uses explicit `profiles!<fkey>(...)`. Fix is complete.
+
+### Impact on the failed publish
+
+The publish itself is committed and correct. The un-emailed applicants can see their status on `/profile` (the publication-based masking rule reveals it). No further action required unless you want to add a "Resend result emails" admin control — deferred.
+
+### Cleanup adjacency
+
+Post-step-20 (drop `applications.note_by` column + FK), this ambiguity vanishes and the disambiguation becomes cosmetic. Keeping it in the code either way — explicit is more defensive against future re-introductions.
+
+### Verification
+
+- `npx tsc --noEmit` — clean.
+- Consumer-side grep for un-disambiguated `profiles(` embeds — zero remaining.
+- Re-run publish_results on the next test drive to confirm end-to-end email delivery.
+
 
 

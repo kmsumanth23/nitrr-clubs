@@ -30,6 +30,22 @@ const nullableText = z
     "Description too long (max 2000 chars)",
   );
 
+/**
+ * WhatsApp group invite link. Basic shape check — Supabase accepts anything,
+ * so client-side validation is friendly-error-only. Accepts chat.whatsapp.com
+ * invites as well as generic https URLs (some clubs use link shorteners).
+ * 16C: mandatory on create + update.
+ */
+const whatsappLinkSchema = z
+  .string()
+  .trim()
+  .min(1, "Interview WhatsApp link is required")
+  .max(500, "Link is too long")
+  .refine(
+    (url) => /^https?:\/\//i.test(url),
+    "Must be a valid URL starting with http:// or https://",
+  );
+
 /** Drive create — used by the /recruitment/new page. */
 export const createDriveSchema = z.object({
   clubId: z.string().uuid(),
@@ -38,6 +54,7 @@ export const createDriveSchema = z.object({
   targetYears: targetYearsSchema,
   deadline: nullableDatetime,
   resultDate: nullableDatetime,
+  interviewWhatsappLink: whatsappLinkSchema, // 16C: mandatory
 });
 
 export type CreateDriveInput = z.infer<typeof createDriveSchema>;
@@ -50,6 +67,7 @@ export const updateDriveSchema = z.object({
   targetYears: targetYearsSchema,
   deadline: nullableDatetime,
   resultDate: nullableDatetime,
+  interviewWhatsappLink: whatsappLinkSchema, // 16C: mandatory
 });
 
 export type UpdateDriveInput = z.infer<typeof updateDriveSchema>;
