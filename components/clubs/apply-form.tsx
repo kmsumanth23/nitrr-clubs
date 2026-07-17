@@ -6,6 +6,7 @@ import {
   submitApplication,
   type ApplicationResult,
 } from "@/lib/actions/application";
+import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
 
 interface KnownProfile {
   full_name: string | null;
@@ -40,6 +41,7 @@ export function ApplyForm({
   profile,
   questions,
   existingApplication,
+  interviewWhatsappLink,
 }: {
   driveId: string;
   clubSlug: string;
@@ -47,6 +49,7 @@ export function ApplyForm({
   profile: KnownProfile;
   questions: Question[];
   existingApplication: ExistingApplication | null;
+  interviewWhatsappLink: string | null;
 }) {
   const [state, formAction] = useActionState<ApplicationResult, FormData>(
     submitApplication,
@@ -73,9 +76,24 @@ export function ApplyForm({
       )}
 
       {editing && (
-        <div className="rounded-2xl border border-line bg-cream/40 px-4 py-3 text-xs text-ink-soft">
-          You&apos;ve already applied. You can update your answers until the
-          deadline.
+        <div className="rounded-2xl border border-line bg-cream/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-ink-soft">
+              You&apos;ve already applied. You can update your answers until the
+              deadline.
+            </p>
+            {interviewWhatsappLink && (
+              <div className="flex items-center gap-2 rounded-xl border border-[#25D366]/30 bg-[#25D366]/5 py-1.5 pl-3 pr-1.5">
+                <span className="text-[11px] font-medium text-[#25D366]">
+                  Interview group
+                </span>
+                <WhatsAppLinkButton
+                  url={interviewWhatsappLink}
+                  label="Interview WhatsApp group"
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 

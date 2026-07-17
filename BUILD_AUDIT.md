@@ -1285,5 +1285,80 @@ Post-step-20 (drop `applications.note_by` column + FK), this ambiguity vanishes 
 - Consumer-side grep for un-disambiguated `profiles(` embeds — zero remaining.
 - Re-run publish_results on the next test drive to confirm end-to-end email delivery.
 
+---
+
+# 16C Batch 2 — UI integration (4 surfaces) + CLAUDE.md close
+
+Closes 16C. Wires `<WhatsAppLinkButton>` from Batch 1 into the four reveal surfaces + one small query patch.
+
+## Divergences from the patch spec (handled)
+
+Two anchors in the patch spec did not match the current codebase:
+
+1. **Profile page uses `getMyProfileClubs`, not `getMyMemberships`.** The Batch 1 patch to `MyMembership.club` doesn't reach the actual page (that query is now marked `@deprecated`). Extended `MyProfileClub` too and taught `getMyProfileClubs` to fetch `community_whatsapp_link` from the joined clubs on both admin and member branches.
+2. **Application row uses a pill cluster (post-Batch-1 addendum), not the older inline `<StatusPill>` layout.** Inserted the `<WhatsAppLinkButton>` at the front of the right-side cluster, ahead of the status pill, so it sits next to (not inside) the pill row.
+
+## Files patched
+
+| File | Change |
+|---|---|
+| [lib/queries/apply.ts](lib/queries/apply.ts) | `DriveForApply.drive` gets `interview_whatsapp_link: string \| null`. SELECT + mapper updated. |
+| [components/clubs/apply-form.tsx](components/clubs/apply-form.tsx) | New `interviewWhatsappLink: string \| null` prop. "Editing" banner replaced with a two-item flex layout — copy on the left, a `#25D366`-tinted "Interview group" pill with the `<WhatsAppLinkButton>` on the right. Reveal condition: `editing && interviewWhatsappLink`. Not shown in the reapplying/withdrawn banner. |
+| [app/(student)/clubs/[slug]/apply/[driveId]/page.tsx](app/(student)/clubs/[slug]/apply/[driveId]/page.tsx) | Pass `interviewWhatsappLink={driveInfo.drive.interview_whatsapp_link}` to `<ApplyForm>`. |
+| [components/profile/application-row.tsx](components/profile/application-row.tsx) | Reveal computed in the outer `<ApplicationRow>`: `!!interviewLink && !results_published_at && status not in (withdrawn, removed)`. Passed into `<RowHeader>` (new props: `showInterviewLink`, `interviewLink`). Icon rendered at the front of the pill cluster on the right. |
+| [lib/queries/profile.ts](lib/queries/profile.ts) | Extended `MyProfileClub` with `community_whatsapp_link: string \| null`. Both parallel SELECTs in `getMyProfileClubs` now join `community_whatsapp_link` from `clubs`. Both loops populate the field. |
+| [app/(student)/profile/page.tsx](app/(student)/profile/page.tsx) | Per My Clubs row, when `c.community_whatsapp_link && !isArchived`, render `<WhatsAppLinkButton>` at the front of the right cluster (before role pill + decommissioned badge). Archived clubs suppress the button — no active community. |
+| [app/(marketing)/clubs/[slug]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx) | Removed `export const revalidate = 60`, replaced with `export const dynamic = "force-dynamic"` — auth-dependent rendering can't stay pure ISR. Added `club_members` lookup for `user.id` inside the page. New "Members-only / Community group" pill in the aside when `isMember && club.community_whatsapp_link`. |
+| [CLAUDE.md](CLAUDE.md) | Moved 16a/16b/16c from Left → Done with real descriptions. Renumbered 16d? → 22. Marked `interview_whatsapp_link` as `NOT NULL` in the recruitments schema block. Rewrote the lifecycle diagram's phase notes and the "WhatsApp reveals" prose to match the shipped semantics (reveal on apply, hide post-publish, community link tied to `club_members`). |
+
+## Reveal semantics (as shipped)
+
+| Surface | Condition |
+|---|---|
+| Application row (profile) | `interview_whatsapp_link` set + `!results_published_at` + status not in `withdrawn`/`removed` |
+| Apply form ("editing" banner) | Existing app with status `pending`/`reviewing` + `interviewWhatsappLink` set. Not shown for reapply-from-withdrawn. |
+| Club detail aside | Authenticated user is in `club_members` for that club + `community_whatsapp_link` set |
+| Profile "My clubs" row | Row present in `MyProfileClub` (i.e. admin OR member) + `community_whatsapp_link` set + not archived |
+
+The last row's condition is slightly wider than the Batch 1 SETUP wording — admins of a club are also in the club's community in practice, and if they appear in "My clubs" the reveal is honest. Archived clubs suppress the button; no active community there.
+
+## Trade-off: `dynamic = "force-dynamic"` on club detail
+
+Auth-based rendering on `/clubs/[slug]` couldn't stay pure ISR without a client-component split. Went with option B from the patch (force-dynamic) for simplicity. Club detail pages are lightweight; the perf hit is small and CDN caches at the request level still help. Option C (client component that fetches membership state) is available if the perf hit shows up in Vercel analytics.
+
+`generateStaticParams` is still declared but effectively becomes a no-op with force-dynamic. Left in place — Next 16 handles the combination gracefully and it documents the slug set for future ISR restoration if we split the pill out.
+
+## Verifications
+
+- `npx tsc --noEmit` — clean.
+- Consumer-side grep for un-wired usages of `interview_whatsapp_link` / `community_whatsapp_link` in student surfaces: all four spots wired.
+- No new migrations. Pure UI + one query patch.
+
+## Not touched by Batch 2 (still deferred)
+
+- Question-edit data integrity — step 21.
+- Applicant notification when drive fields change — step 21 companion.
+- Interview-link leak-through browser history — accepted risk, noted in SETUP.
+- `dynamic = "force-dynamic"` → SSG hybrid (option C) — hold until perf data warrants.
+
+## Smoke test — recommended run order
+
+1. **Interview link on profile application row**: apply as Recruit → row shows `#25D366` WhatsApp icon between the cluster and the status pill. Click → modal with Join / Copy.
+2. **Interview link on apply form**: revisit the apply page after applying → banner shows "You've already applied" + green "Interview group" pill with icon.
+3. **Interview link hides post-publish**: as lead, publish results. Recruit refreshes profile → icon disappears (rejected: nothing; accepted: replaced by community icon on My clubs row).
+4. **Community link on My clubs (profile)**: for a club with `community_whatsapp_link` set where you're a member (or admin), icon appears. Archived clubs suppress.
+5. **Community link on club detail aside**: as authenticated member, the Members-only Community group pill appears. As anon or non-member: no pill.
+6. **Withdrawn state**: apply then withdraw → interview icon disappears from the (now-withdrawn) row.
+
+## After Batch 2
+
+**16C complete. Step 16 shipped end-to-end** (drive schema + admin management + public apply flow + WhatsApp reveals + mandatory interview link). Roadmap now advances to:
+- Step 17 (TBD — event RSVP or member badges most likely)
+- Step 18 (post-deploy security)
+- Step 19 (UI/UX pass)
+- Step 20 (post-16 maintenance sweep — grep-guarded)
+- Step 21 (question-edit data integrity)
+- Step 22 (drop `clubs.is_recruiting`)
+
 
 

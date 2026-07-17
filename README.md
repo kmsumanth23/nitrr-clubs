@@ -164,3 +164,12 @@ Things that won't fit elsewhere. Health checks, broadcast notifications via a ba
 
 Annual club activity reports
 JSON backup format
+
+15 july
+we need to work on user tags for dives
+multiple choice questions
+the question edit winow should be dynamic in size
+what hhappens to the application if a drive is deletes at any point of the recruitment life cycle?
+history tab and my club tabs must match in design
+change order my clubs > my applications > history
+add drive specific community link too

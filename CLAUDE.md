@@ -119,7 +119,7 @@ recruitments (id PK, club_id FK, name, description,
               deadline timestamptz, result_date timestamptz,
               published_at timestamptz null,          -- 16A: null = draft
               results_published_at, results_published_by FK,
-              interview_whatsapp_link text,
+              interview_whatsapp_link text NOT NULL,  -- 16C: mandatory on create/publish
               interview_mode text CHECK in (online|offline|hybrid),
               created_by FK, created_at)
 
@@ -277,10 +277,12 @@ CSV parser is inline at `lib/csv/parse.ts` — no dependency. Handles quoted fie
   └──────────┘  (lead)     └──────────┘   passes     └────────────┘  results     └──────────┘
    • admin only              • student CRUD            • admin decides            • locked
    • not visible             • no decisions            • student locked           • members materialized
-   • edit freely                                       • interview WhatsApp          from accepteds
-                                                        revealed (step 16C)       • community WhatsApp
-                                                                                    revealed to accepteds
-                                                                                    (step 16C)
+   • edit freely             • interview WhatsApp      • interview WhatsApp          from accepteds
+                               revealed on apply         still revealed            • interview link
+                               (non-withdrawn)           (non-withdrawn)             hidden (masking-safe)
+                                                                                  • community WhatsApp
+                                                                                    revealed to
+                                                                                    club_members
 ```
 
 Each "Start new recruitment" (pre-16A) OR each `create_drive` (16A onwards) inserts a new `recruitments` row. Old rows stay as history. Students can re-apply in future recruitments (different row), not in the same one (unique constraint blocks).
@@ -370,20 +372,20 @@ For archived clubs: sysadmin can still access all sub-pages (sees existing "deco
 | 15c | Email verification flow fix + `/auth/verify-email` landing page with cross-tab poller + `/auth/verified` ack page |
 | 15d | Forgot-password flow: `/auth/forgot-password` + `/auth/reset-password` (two-mode: recovery-link vs signed-in change) + "Change password" affordance on `/profile` |
 | 15e | Email domain allowlist + Gmail canonicalization (strips `+tag` + dots, normalizes `googlemail.com` → `gmail.com`) |
+| 16a | Drive schema + admin drive management: draft support, target years, per-drive questions, list view with year filter, drive editor (create/edit/publish/delete) (3 batches + post-landing refinements) |
+| 16b | Public apply flow with eligibility gate + multiple drives per club; admin drive-driven applications review; profile row modal-edit redesign + append-only note history (2 batches + 4 addenda) |
+| 16c | WhatsApp reveals: interview link revealed on apply/edit (hidden post-publish, masking-safe); community link revealed to `club_members` on club detail page + profile. Mandatory `interview_whatsapp_link` on drive create/update/publish. (2 batches) |
 
 ### Left
 
 | Step | Description |
 |---|---|
-| **16a** | 🚧 Drive schema + admin drive management: draft support, target years, per-drive questions, list view with year filter, drive editor (create/edit/publish/delete) |
-| **16b** | Public apply flow with eligibility gate (client hide/gray + server reject) + multiple drives per club |
-| **16c** | WhatsApp reveals: interview link at REVIEW to non-withdrawn applicants; community link at RESULT to accepted members |
-| **16d?** | Dedicated step: remove `clubs.is_recruiting`, compute dynamically from drive phases, refactor consumers |
 | **17** | TBD candidates: event RSVP/attendance, recruitment workflow improvements (interview slots), member badges |
 | **18** | Post-deploy P0/P1 security fixes (profile-search filter injection, signout GET→POST, signup flow, email verification landing) |
 | **19** | UI/UX pass (Radix Dialog migration, `loading.tsx` segments, lightbox a11y, mobile redesigns, `window.location.reload()` migration, accent color decision) |
 | **20** | Post-16 maintenance sweep: drop `updateRecruitment` / `startNewRecruitment` / `getApplicationHistoryForClub` / `RecruitmentHistoryGroup`; drop `applications.note` / `note_by` / `note_at` columns + FK; drop `clubs.is_recruiting` if not folded into 16d. Guarded by grep sweep before removal. |
 | **21** | Question-edit data integrity (data-integrity, not UX): during a review→open deadline-extension roundtrip, admins can edit question prompts with existing responses attached — silent misalignment. Fix: snapshot each `q.prompt` onto `applications.responses[q_id]` at submit-time so the review UI can always render "response to: `<original prompt>`" even after edits. Pair with the deferred applicant-notification-on-drive-edit feature. |
+| **22** | Dedicated: remove `clubs.is_recruiting`, compute dynamically from drive phases. Refactor ~10 consumer files. Was tracked as 16d? during 16 planning; renumbered for clarity. |
 
 ---
 
@@ -421,9 +423,9 @@ Each drive has:
 
 Lifecycle: DRAFT → OPEN (on publish) → REVIEW (on deadline passes) → RESULT (on lead publish results).
 
-WhatsApp reveals:
-- **Interview link** (`recruitments.interview_whatsapp_link`) — revealed at REVIEW to non-withdrawn applicants
-- **Community link** (`clubs.community_whatsapp_link`) — revealed at RESULT to accepted members
+WhatsApp reveals (shipped 16C):
+- **Interview link** (`recruitments.interview_whatsapp_link`, mandatory) — revealed on apply/edit surfaces while `!results_published_at` and student is non-withdrawn/removed. Hidden post-publish so it doesn't correlate with acceptance.
+- **Community link** (`clubs.community_whatsapp_link`) — revealed to `club_members` on the club detail aside + on the profile "My clubs" rows. Membership materializes on publish, so this naturally gates on results.
 
 Split into 3 sub-steps + a dedicated cleanup step:
 - **16A** — Schema + admin drive management + draft support (schema + RPCs shipped in round 1; code in round 2)
@@ -654,3 +656,42 @@ Features and improvements surfaced during step 14 but pushed forward. Single sou
 - Real photos, font polishing deferred
 - Google OAuth console setup pending (code path done since step 6)
 - Decommissioned card tint (cream/40 bg) on `/admin` + `/profile` is optional polish — can be stripped if you prefer identical appearance to active cards
+
+### Deferred items catalog (with step assignments)
+
+**Step 18 — Post-deploy P0/P1 security:**
+- `safeNext()` protocol-relative URL bypass (`//evil.com` starts with `/`)
+- Year-impersonation defense (snapshot `applicant_year` at apply time + rate-limit profile.year edits)
+- Signout GET → POST (CSRF hardening)
+
+**Step 20 — Post-16 maintenance sweep:**
+- Drop `updateRecruitment` action (dead code after 16A Batch 3b)
+- Drop `startNewRecruitment` action (dead code)
+- Drop `getApplicationHistoryForClub` and `RecruitmentHistoryGroup` (dead code after 16B Batch 2b)
+- Drop `applications.note`, `note_by`, `note_at` columns + FK (dead code after 16B addendum 1)
+- Sweep `note_author:profiles!applications_note_by_fkey(...)` from `admin-applications.ts` (already stripped in post-16B cleanup, but verify no reintroduction)
+- Regenerate `database.types.ts` via `supabase gen types` to reflect all 16 series schema changes
+
+**Step 21 — Question-edit data-integrity:**
+- Snapshot `q.prompt` onto `applications.responses[q_id]` at submit-time (responses shape becomes `Record<question_id, { prompt, answer }>` or parallel `response_prompts` object)
+- Applicant notification on drive edit (email via Resend, debounced per edit session — one email per applicant per session, not per field)
+- Admin soft-warning banner when editing drive fields with `applicant_count > 0`
+- Consider blocking question edits during Open phase when responses exist (harder gate)
+
+**Step 22 — Compute `clubs.is_recruiting` from drives:**
+- Drop the `clubs.is_recruiting` column
+- Update ~10 files that reference it (grep sweep required before removal)
+- Compute from any drive in Open phase for the club (derive, don't store)
+- Remove is_recruiting toggle from club edit form
+
+**Not currently scheduled (backlog / low urgency):**
+- Multi-select / choice question types (radio, checkbox, yes/no, dropdown) — schema work + UI complexity, deferred until real request
+- Interview link hardening — column-level RLS OR separate table with tighter reads (currently anyone can query `recruitments.interview_whatsapp_link` directly, worst-case a determined attacker joins the interview group; admin can kick)
+- Rate-limiting on WhatsApp link reveal query (mitigation for above, if hardening deferred)
+- Email notification on interview-link-reveal (nice-to-have, would tell applicants "you got the link" instead of relying on them checking profile)
+- Admin "preview as applicant" for interview link on drive editor
+- Filter tabs on admin drive list (All / Open / Review / Result / Draft / by year) — deferred; flat list works for now
+- Waitlist status enum value (`waitlisted`) — dropped from 16A v1; add if clubs request
+- Cross-flow account merge (email/password user + Google OAuth user with same underlying email colliding as different accounts) — rare edge case
+- PDF export / recruitment reports (misremembered as step 17 earlier; genuinely no plan)
+- Change-password link from `/profile` settings page (in-app password change already works at `/auth/reset-password?recovery=1` but needs a settings entry point)

@@ -5,6 +5,7 @@ import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { IconClock, IconCalendar } from "@tabler/icons-react";
 import { Modal } from "@/components/ui/modal";
+import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
 import {
   updateApplication,
   withdrawApplication,
@@ -30,6 +31,16 @@ export function ApplicationRow({ app }: { app: MyApplication }) {
     app.status !== "withdrawn" &&
     app.status !== "removed";
 
+  // 16C: interview link reveal — visible while results aren't published and
+  // the student is still in the interview pool (not withdrawn/removed).
+  // Correlates with acceptance if it lingered post-publish, so we hide then.
+  const interviewLink = app.recruitment?.interview_whatsapp_link ?? null;
+  const showInterviewLink =
+    !!interviewLink &&
+    !app.recruitment?.results_published_at &&
+    app.status !== "withdrawn" &&
+    app.status !== "removed";
+
   return (
     <li className="rounded-2xl border border-line bg-white p-5">
       <RowHeader
@@ -37,6 +48,8 @@ export function ApplicationRow({ app }: { app: MyApplication }) {
         phase={phase}
         editable={editable}
         onEdit={() => setEditing(true)}
+        showInterviewLink={showInterviewLink}
+        interviewLink={interviewLink}
       />
       {editable && (
         <Modal
@@ -61,11 +74,15 @@ function RowHeader({
   phase,
   editable,
   onEdit,
+  showInterviewLink,
+  interviewLink,
 }: {
   app: MyApplication;
   phase: Phase | null;
   editable: boolean;
   onEdit: () => void;
+  showInterviewLink: boolean;
+  interviewLink: string | null;
 }) {
   const club = app.club;
   const rec = app.recruitment;
@@ -105,6 +122,12 @@ function RowHeader({
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-1.5">
+        {showInterviewLink && interviewLink && (
+          <WhatsAppLinkButton
+            url={interviewLink}
+            label="Interview WhatsApp group"
+          />
+        )}
         <StatusPill
           status={app.status}
           resultsPublishedAt={rec?.results_published_at ?? null}

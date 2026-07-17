@@ -9,13 +9,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { placeholderBg } from "@/components/ui/icon";
 import { OpenDrivesSection } from "@/components/clubs/open-drives-section";
+import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
+import { createClient } from "@/lib/supabase/server";
 import {
   getClubBySlug,
   getArchivedClubBySlug,
   getAllClubSlugs,
 } from "@/lib/queries/clubs";
 
-export const revalidate = 60; // ISR
+// 16C: community WhatsApp reveal needs an auth check — force dynamic so we
+// re-render per viewer. Loses ISR for this page; club pages are lightweight.
+export const dynamic = "force-dynamic";
 
 // Pre-render every club page at build time (SSG), then ISR keeps them fresh.
 export async function generateStaticParams() {
@@ -71,6 +75,22 @@ export default async function ClubDetailPage({
       return <DecommissionedClubPage archived={archived} />;
     }
     notFound();
+  }
+
+  // 16C: community link reveal only for members of THIS club.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  let isMember = false;
+  if (user) {
+    const { data: memberRow } = await supabase
+      .from("club_members")
+      .select("club_id")
+      .eq("club_id", club.id)
+      .eq("profile_id", user.id)
+      .maybeSingle();
+    isMember = !!memberRow;
   }
 
   const color = club.category?.color ?? "#5B52E0";
@@ -146,6 +166,23 @@ export default async function ClubDetailPage({
             <div className="rounded-xl bg-white px-4 py-3 text-center text-xs text-ink-soft">
               See open drives below to apply.
             </div>
+            {/* 16C: members-only community WhatsApp reveal */}
+            {isMember && club.community_whatsapp_link && (
+              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-[#25D366]/30 bg-[#25D366]/5 px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-medium uppercase tracking-wide text-ink-soft">
+                    Members-only
+                  </div>
+                  <div className="text-xs font-medium text-ink">
+                    Community group
+                  </div>
+                </div>
+                <WhatsAppLinkButton
+                  url={club.community_whatsapp_link}
+                  label={`${club.name} community group`}
+                />
+              </div>
+            )}
           </aside>
         </div>
 

@@ -147,6 +147,8 @@ export interface MyProfileClub {
   name: string;
   category: Category | null;
   archived_at: string | null;
+  /** 16C: community WhatsApp link. Shown as a small button in the row when set. */
+  community_whatsapp_link: string | null;
   role: "lead" | "manager" | "editor" | "member";
   /** For members: when they joined.
    *  For admins-only: null (no joined_at; show role tag without date). */
@@ -174,13 +176,13 @@ export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
     supabase
       .from("club_admins")
       .select(
-        "admin_role, club:clubs(id, slug, name, archived_at, category:categories(*))",
+        "admin_role, club:clubs(id, slug, name, archived_at, community_whatsapp_link, category:categories(*))",
       )
       .eq("profile_id", user.id),
     supabase
       .from("club_members")
       .select(
-        "joined_at, club:clubs(id, slug, name, archived_at, category:categories(*))",
+        "joined_at, club:clubs(id, slug, name, archived_at, community_whatsapp_link, category:categories(*))",
       )
       .eq("profile_id", user.id),
   ]);
@@ -197,6 +199,7 @@ export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
       name: r.club.name,
       category: r.club.category ?? null,
       archived_at: r.club.archived_at ?? null,
+      community_whatsapp_link: r.club.community_whatsapp_link ?? null, // 16C
       role: r.admin_role,
       joined_at: null,
     });
@@ -218,6 +221,7 @@ export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
       name: r.club.name,
       category: r.club.category ?? null,
       archived_at: r.club.archived_at ?? null,
+      community_whatsapp_link: r.club.community_whatsapp_link ?? null, // 16C
       role: "member",
       joined_at: r.joined_at,
     });

@@ -10,6 +10,7 @@ import {
 import { ProfileEditForm } from "@/components/profile/profile-edit-form";
 import { ApplicationsList } from "@/components/profile/applications-list";
 import { DecommissionedBadge } from "@/components/ui/decommissioned-badge";
+import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
 
 export const metadata = { title: "Profile — NITRR Clubs" };
 export const dynamic = "force-dynamic";
@@ -102,6 +103,15 @@ export default async function ProfilePage() {
                       </div>
                     </div>
                     <div className="flex flex-shrink-0 items-center gap-2">
+                      {/* 16C: community WhatsApp — shown when the club has a
+                          link set. Reveal is safe here because appearing in
+                          "My clubs" already implies membership/admin access. */}
+                      {c.community_whatsapp_link && !isArchived && (
+                        <WhatsAppLinkButton
+                          url={c.community_whatsapp_link}
+                          label={`${c.name} community group`}
+                        />
+                      )}
                       <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
                         {c.role}
                       </span>
