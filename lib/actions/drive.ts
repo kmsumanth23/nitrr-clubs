@@ -12,6 +12,7 @@ import {
   updateQuestionSchema,
   deleteQuestionSchema,
   swapQuestionOrderSchema,
+  updateDriveCommunityLinkSchema,
 } from "@/lib/validation/drive";
 
 /** Common result shape for drive actions. Flat all-optional (matches the
@@ -52,6 +53,7 @@ export async function createDrive(
     deadline: (formData.get("deadline") as string) ?? "",
     resultDate: (formData.get("resultDate") as string) ?? "",
     interviewWhatsappLink: formData.get("interviewWhatsappLink") ?? "",
+    communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -67,6 +69,7 @@ export async function createDrive(
     deadline_in: parsed.data.deadline,
     result_date_in: parsed.data.resultDate,
     interview_whatsapp_link_in: parsed.data.interviewWhatsappLink, // 16C
+    community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null, // 17A
   } as never);
   if (error) {
     console.error("createDrive rpc failed:", error);
@@ -114,6 +117,7 @@ export async function updateDrive(
     deadline: (formData.get("deadline") as string) ?? "",
     resultDate: (formData.get("resultDate") as string) ?? "",
     interviewWhatsappLink: formData.get("interviewWhatsappLink") ?? "",
+    communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -127,6 +131,7 @@ export async function updateDrive(
     deadline_in: parsed.data.deadline,
     result_date_in: parsed.data.resultDate,
     interview_whatsapp_link_in: parsed.data.interviewWhatsappLink, // 16C
+    community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null, // 17A
   } as never);
   if (error) {
     console.error("updateDrive rpc failed:", error);
@@ -317,4 +322,34 @@ export async function swapDriveQuestionOrder(
 
   revalidateDrive(clubSlug, driveIdForRevalidation);
   return { ok: true };
+}
+
+// ============================================================================
+// 9. updateDriveCommunityLink — 17A carve-out for post-publish community link
+//    edits. No phase gate (result phase is the whole point).
+// ============================================================================
+export async function updateDriveCommunityLink(
+  _prev: DriveResult,
+  formData: FormData,
+): Promise<DriveResult> {
+  const clubSlug = formData.get("__club_slug") as string;
+
+  const parsed = updateDriveCommunityLinkSchema.safeParse({
+    driveId: formData.get("driveId"),
+    communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("update_drive_community_link", {
+    drive_id_in: parsed.data.driveId,
+    community_whatsapp_link_in: parsed.data.communityWhatsappLink,
+  } as never);
+  if (error) {
+    console.error("updateDriveCommunityLink rpc failed:", error);
+    return { error: error.message };
+  }
+
+  revalidateDrive(clubSlug, parsed.data.driveId);
+  return { ok: true, driveId: parsed.data.driveId };
 }

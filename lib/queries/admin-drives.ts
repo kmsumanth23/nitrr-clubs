@@ -11,6 +11,7 @@ export interface DriveListItem {
   result_date: string | null;
   published_at: string | null;
   results_published_at: string | null;
+  community_whatsapp_link: string | null; // 17A
   created_at: string;
   phase: Phase;
   applicant_count: number;
@@ -32,6 +33,7 @@ export interface DriveWithQuestions {
   published_at: string | null;
   results_published_at: string | null;
   interview_whatsapp_link: string | null; // 16C
+  community_whatsapp_link: string | null; // 17A
   created_at: string;
   phase: Phase;
   questions: DriveQuestion[];
@@ -59,7 +61,7 @@ export async function listDrivesForClub(
     .from("recruitments")
     .select(
       `id, name, description, target_years, deadline, result_date,
-       published_at, results_published_at, created_at,
+       published_at, results_published_at, community_whatsapp_link, created_at,
        applications(count)`,
     )
     .eq("club_id", clubId)
@@ -108,6 +110,7 @@ export async function listDrivesForClub(
       result_date: r.result_date,
       published_at: r.published_at,
       results_published_at: r.results_published_at,
+      community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
       created_at: r.created_at,
       phase,
       applicant_count: r.applications?.[0]?.count ?? 0,
@@ -126,7 +129,8 @@ export async function getDriveWithQuestions(
     .from("recruitments")
     .select(
       `id, club_id, name, description, target_years, deadline, result_date,
-       published_at, results_published_at, interview_whatsapp_link, created_at,
+       published_at, results_published_at, interview_whatsapp_link,
+       community_whatsapp_link, created_at,
        drive_questions(id, prompt, question_type, sort_order, required)`,
     )
     .eq("id", driveId)
@@ -161,6 +165,7 @@ export async function getDriveWithQuestions(
     published_at: r.published_at,
     results_published_at: r.results_published_at,
     interview_whatsapp_link: r.interview_whatsapp_link ?? null, // 16C
+    community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
     created_at: r.created_at,
     phase,
     questions: (r.drive_questions ?? []).map(

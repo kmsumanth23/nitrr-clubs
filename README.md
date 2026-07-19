@@ -98,18 +98,6 @@ the original brain-dump so nothing is lost.
 
 ### Dated items
 
-**1. My Clubs page (2026-05-27)**
-A button/page for logged-in users to view clubs they've applied to or
-joined. Likely a tab on /profile or a separate /profile/my-clubs page.
-Query applications + club_members filtered by profile_id.  *(✓ done — "My
-clubs" section on /profile; Active/History split for applications)*
-
-**2. Recruiter Meet Link (2026-05-27)**
-Club admins can attach a Google Meet link to an application during review.
-Student sees it on their profile when status is reviewing. Needs a meet_link
-column on applications (or in the responses jsonb). Could tie into step 10
-(email notifications).  *(future — fits naturally with step 15 notifications
-or step 16 recruitment redesign)*
 
 **3. Welcome Back Pill (2026-05-29)**
 Animated pill next to the profile avatar after login — says "Welcome back"
@@ -117,10 +105,7 @@ and fades out after ~3 seconds. Detect !user → user transition in Navbar,
 render with CSS fade-out animation, clear via setTimeout.  *(future — UI/UX
 pass, step 19)* we can just retype the nitrr logo to welcome back first name and then again type back the club name
 
-**4. Post-Deploy Claude Analysis (2026-05-28)**
-After step 13 (deploy), run a full Claude Code analysis pass: a11y,
-performance, UX flows, code quality.  *(scheduled — runs after step 13b
-completes)*
+
 
 ### More ideas
 
@@ -141,9 +126,8 @@ completes)*
 - every user must see there badge in there clubs in my profile  *(future — show "Lead/Manager/Editor/Member" badge per club on /profile; UI/UX pass)*
 - when viewd on the galary photo on homepage it must show the details of the photo of what events it was from and club  *(future — lightbox/modal on homepage gallery with metadata; UI/UX pass + needs photo→event linking which currently isn't enforced since gallery is standalone per Model A from step 9e)*
 
-add notification on sigvnout 
+add notification popup on signout 
 
-and profile search must show if searching already existing user.
 
 test direct access linkss if redirects are working or not
 
@@ -151,16 +135,6 @@ when a signed in user is deleted there is a glitch the profile button and signou
 
 Banner system: sysadmin can post a site-wide announcement (e.g. "Recruitment season starts Monday")
 
-Step 17 — Data export advanced + reporting
-
-PDF export (client-side library, pdf-lib)
-Per-cycle recruitment report (applications received, accept rate, demographics)
-Annual club activity report
-Export to JSON for backup confidence
-
-About 8-10 files.
-Step 18 — Polish + extras
-Things that won't fit elsewhere. Health checks, broadcast notifications via a banner, profile/user management for sysadmin (edit, hard delete with cascade analysis), data import variants, etc. Loose collection.
 
 Annual club activity reports
 JSON backup format
@@ -173,3 +147,14 @@ what hhappens to the application if a drive is deletes at any point of the recru
 history tab and my club tabs must match in design
 change order my clubs > my applications > history
 add drive specific community link too
+
+allow pdf image etc upload in application
+
+add a user guied in profile page.
+
+ripple effect on home page.
+
+
+to do 
+
+need to work on event management

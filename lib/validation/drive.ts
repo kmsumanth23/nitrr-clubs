@@ -46,6 +46,19 @@ const whatsappLinkSchema = z
     "Must be a valid URL starting with http:// or https://",
   );
 
+/** 17A: nullable variant for the drive-specific community link. Empty string
+ *  becomes null so an unset field doesn't overwrite the club-level fallback. */
+const optionalWhatsappLinkSchema = z
+  .string()
+  .trim()
+  .max(500, "Link is too long")
+  .refine(
+    (url) => url === "" || /^https?:\/\//i.test(url),
+    "Must be a valid URL starting with http:// or https://",
+  )
+  .transform((v) => (v === "" ? null : v))
+  .nullable();
+
 /** Drive create — used by the /recruitment/new page. */
 export const createDriveSchema = z.object({
   clubId: z.string().uuid(),
@@ -55,6 +68,7 @@ export const createDriveSchema = z.object({
   deadline: nullableDatetime,
   resultDate: nullableDatetime,
   interviewWhatsappLink: whatsappLinkSchema, // 16C: mandatory
+  communityWhatsappLink: optionalWhatsappLinkSchema.optional(), // 17A: optional
 });
 
 export type CreateDriveInput = z.infer<typeof createDriveSchema>;
@@ -68,7 +82,19 @@ export const updateDriveSchema = z.object({
   deadline: nullableDatetime,
   resultDate: nullableDatetime,
   interviewWhatsappLink: whatsappLinkSchema, // 16C: mandatory
+  communityWhatsappLink: optionalWhatsappLinkSchema.optional(), // 17A: optional
 });
+
+/** 17A: post-publish carve-out — only community link is editable via the
+ *  dedicated RPC, no phase gate. */
+export const updateDriveCommunityLinkSchema = z.object({
+  driveId: z.string().uuid(),
+  communityWhatsappLink: optionalWhatsappLinkSchema,
+});
+
+export type UpdateDriveCommunityLinkInput = z.infer<
+  typeof updateDriveCommunityLinkSchema
+>;
 
 export type UpdateDriveInput = z.infer<typeof updateDriveSchema>;
 

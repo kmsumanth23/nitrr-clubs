@@ -56,6 +56,17 @@ export function QuestionEditorRow({
   const [required, setRequired] = React.useState(question.required);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
 
+  // 17A: auto-resize the prompt textarea as the user types multi-line
+  // questions. CSS `field-sizing: content` would replace this but Firefox
+  // still lacks support (as of early 2026) — the ref + effect works everywhere.
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  React.useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [prompt]);
+
   function buildFormData(overrides: {
     prompt?: string;
     type?: "short_text" | "long_text";
@@ -122,15 +133,17 @@ export function QuestionEditorRow({
 
         {/* Content column */}
         <div className="min-w-0 flex-1 space-y-3">
-          {/* Prompt textarea */}
+          {/* Prompt textarea — auto-resizes on prompt change (17A) */}
           <textarea
+            ref={textareaRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onBlur={savePrompt}
             disabled={disabled}
             rows={2}
             placeholder="Type your question…"
-            className="w-full resize-none rounded-xl border border-line bg-cream/40 p-2.5 text-sm text-ink outline-none focus:border-indigo focus:bg-white disabled:opacity-50"
+            style={{ minHeight: "60px" }}
+            className="w-full resize-none overflow-hidden whitespace-pre-wrap rounded-xl border border-line bg-cream/40 p-2.5 text-sm text-ink outline-none focus:border-indigo focus:bg-white disabled:opacity-50"
           />
 
           {/* Controls row */}

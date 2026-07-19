@@ -869,6 +869,13 @@ export type Database = {
         }
         Returns: undefined
       }
+      update_drive_community_link: {
+        Args: {
+          community_whatsapp_link_in: string | null
+          drive_id_in: string
+        }
+        Returns: undefined
+      }
       update_drive_question: {
         Args: {
           prompt_in: string

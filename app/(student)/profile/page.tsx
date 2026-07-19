@@ -4,13 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import {
   getMyProfile,
   getMyApplications,
-  getMyProfileClubs,
+  getMyMemberships,
   partitionApplications,
 } from "@/lib/queries/profile";
 import { ProfileEditForm } from "@/components/profile/profile-edit-form";
 import { ApplicationsList } from "@/components/profile/applications-list";
-import { DecommissionedBadge } from "@/components/ui/decommissioned-badge";
-import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
+import { MyClubsList } from "@/components/profile/my-clubs-list";
 
 export const metadata = { title: "Profile — NITRR Clubs" };
 export const dynamic = "force-dynamic";
@@ -22,10 +21,10 @@ export default async function ProfilePage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/?signin=1");
 
-  const [profile, applications, myClubs] = await Promise.all([
+  const [profile, applications, memberships] = await Promise.all([
     getMyProfile(),
     getMyApplications(),
-    getMyProfileClubs(),
+    getMyMemberships(),
   ]);
   if (!profile) redirect("/?signin=1");
 
@@ -48,6 +47,14 @@ export default async function ProfilePage() {
           <ProfileEditForm profile={profile} />
         </section>
 
+        {/* 17A: My clubs first (was third). 2-col card grid via MyClubsList. */}
+        <section>
+          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">
+            My clubs
+          </h2>
+          <MyClubsList memberships={memberships} />
+        </section>
+
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wide text-ink-soft">
@@ -61,69 +68,6 @@ export default async function ProfilePage() {
             </Link>
           </div>
           <ApplicationsList active={active} history={history} />
-        </section>
-
-        <section>
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">
-            My clubs
-          </h2>
-          {myClubs.length === 0 ? (
-            <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
-              You&apos;re not in any clubs yet. Apply to one and once results
-              are published, you&apos;ll see it here.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {myClubs.map((c) => {
-                const isArchived = !!c.archived_at;
-                const isAdmin = c.role !== "member";
-                return (
-                  <li
-                    key={c.club_id}
-                    className={
-                      "flex items-center justify-between gap-3 rounded-2xl border bg-white p-4 " +
-                      (isArchived ? "border-clay/30 bg-cream/40" : "border-line")
-                    }
-                  >
-                    <div className="min-w-0 flex-1">
-                      <Link
-                        href={`/clubs/${c.slug}`}
-                        className="block truncate text-sm font-medium text-ink hover:text-indigo"
-                      >
-                        {c.name}
-                      </Link>
-                      <div className="mt-0.5 text-xs text-ink-soft">
-                        {c.category?.name ?? "Club"}
-                        {!isAdmin && c.joined_at && (
-                          <>
-                            {" "}· Joined{" "}
-                            {new Date(c.joined_at).toLocaleDateString("en-IN")}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-2">
-                      {/* 16C: community WhatsApp — shown when the club has a
-                          link set. Reveal is safe here because appearing in
-                          "My clubs" already implies membership/admin access. */}
-                      {c.community_whatsapp_link && !isArchived && (
-                        <WhatsAppLinkButton
-                          url={c.community_whatsapp_link}
-                          label={`${c.name} community group`}
-                        />
-                      )}
-                      <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
-                        {c.role}
-                      </span>
-                      {isArchived && (
-                        <DecommissionedBadge archivedAt={c.archived_at} />
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
         </section>
       </div>
     </section>

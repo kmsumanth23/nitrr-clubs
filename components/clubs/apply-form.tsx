@@ -145,7 +145,7 @@ function QuestionField({
 
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-ink">
+      <label className="mb-1.5 block whitespace-pre-wrap text-sm font-medium text-ink">
         {question.prompt}{" "}
         {question.required && <span className="text-clay">*</span>}
       </label>

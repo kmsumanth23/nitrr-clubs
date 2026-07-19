@@ -17,6 +17,7 @@ export interface MyApplication extends Application {
     target_years: number[]; // 16B
     published_at: string | null; // 16A
     interview_whatsapp_link: string | null; // 16C
+    community_whatsapp_link: string | null; // 17A: drive-specific override
     questions: DriveQuestion[]; // 16B — sorted by sort_order
   } | null;
   club: (Pick<Club, "name" | "slug"> & { category: Category | null }) | null;
@@ -26,7 +27,10 @@ export interface MyMembership {
   club_id: string;
   joined_at: string;
   club:
-    | (Pick<Club, "name" | "slug" | "archived_at" | "community_whatsapp_link"> & {
+    | (Pick<
+        Club,
+        "name" | "slug" | "archived_at" | "community_whatsapp_link" | "instagram_url"
+      > & {
         category: Category | null;
       })
     | null;
@@ -65,7 +69,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
       `*,
        recruitment:recruitments(
          id, name, deadline, result_date, results_published_at, target_years, published_at,
-         interview_whatsapp_link,
+         interview_whatsapp_link, community_whatsapp_link,
          club:clubs(name, slug, category:categories(*)),
          drive_questions(id, prompt, question_type, sort_order, required)
        )`,
@@ -89,6 +93,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
         target_years: number[];
         published_at: string | null;
         interview_whatsapp_link: string | null;
+        community_whatsapp_link: string | null;
         club: { name: string; slug: string; archived_at: string | null; category: Category | null } | null;
         drive_questions: DriveQuestion[] | null;
       } | null;
@@ -105,6 +110,7 @@ export async function getMyApplications(): Promise<MyApplication[]> {
           target_years: a.recruitment.target_years ?? [1, 2, 3, 4],
           published_at: a.recruitment.published_at,
           interview_whatsapp_link: a.recruitment.interview_whatsapp_link ?? null, // 16C
+          community_whatsapp_link: a.recruitment.community_whatsapp_link ?? null, // 17A
           questions: a.recruitment.drive_questions ?? [],
         }
       : null,
@@ -236,21 +242,70 @@ export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
   });
 }
 
-/** @deprecated since 14f — use {@link getMyProfileClubs} for the unified
- *  admin+member view. Retained for any external/future consumer. */
+/** 17A: un-deprecated. Powers the redesigned "My Clubs" card grid on
+ *  /profile. Members-only view (users with a `club_members` row). Admin-only
+ *  users see their clubs on /admin instead.
+ *
+ *  17A follow-up: resolves `community_whatsapp_link` to the drive-specific
+ *  value when the member's most recent accepted application has one on its
+ *  drive. Falls back to the club-level link otherwise. Avoids the schema
+ *  change to `club_members.source_recruitment_id` that was deferred to 17B —
+ *  the applications table already has enough info to derive this. */
 export async function getMyMemberships(): Promise<MyMembership[]> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
+
   const { data, error } = await supabase
     .from("club_members")
     .select(
-      "club_id, joined_at, club:clubs(name, slug, community_whatsapp_link, archived_at, category:categories(*))",
+      "club_id, joined_at, club:clubs(name, slug, community_whatsapp_link, instagram_url, archived_at, category:categories(*))",
     )
     .eq("profile_id", user.id)
     .order("joined_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as MyMembership[];
+
+  const memberships = (data ?? []) as MyMembership[];
+  if (memberships.length === 0) return memberships;
+
+  // Resolve drive-specific community link per club. For each membership look
+  // up the most recent accepted application (must be published to have
+  // materialized the membership in the first place) whose drive has a
+  // non-null community_whatsapp_link. That value overrides the club-level.
+  const clubIds = memberships.map((m) => m.club_id);
+  const { data: acceptedApps, error: appsErr } = await supabase
+    .from("applications")
+    .select(
+      "club_id, updated_at, recruitment:recruitments(community_whatsapp_link, results_published_at)",
+    )
+    .eq("profile_id", user.id)
+    .eq("status", "accepted")
+    .in("club_id", clubIds)
+    .order("updated_at", { ascending: false });
+  if (appsErr) {
+    console.error("getMyMemberships accepted-apps lookup failed:", appsErr);
+    // Non-fatal: fall through with club-level links only.
+    return memberships;
+  }
+
+  const driveLinkByClub = new Map<string, string>();
+  for (const raw of acceptedApps ?? []) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const a = raw as any;
+    if (driveLinkByClub.has(a.club_id)) continue; // keep newest
+    const link = a.recruitment?.community_whatsapp_link;
+    const published = a.recruitment?.results_published_at;
+    if (link && published) driveLinkByClub.set(a.club_id, link);
+  }
+
+  return memberships.map((m) => {
+    const driveLink = driveLinkByClub.get(m.club_id) ?? null;
+    if (!driveLink || !m.club) return m;
+    return {
+      ...m,
+      club: { ...m.club, community_whatsapp_link: driveLink },
+    };
+  });
 }

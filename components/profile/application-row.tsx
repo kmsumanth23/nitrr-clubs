@@ -309,7 +309,7 @@ function Q({
   const maxLength = isShort ? 250 : 2000;
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-ink">
+      <label className="mb-1.5 block whitespace-pre-wrap text-sm font-medium text-ink">
         {label} {required && <span className="text-clay">*</span>}
       </label>
       {isShort ? (

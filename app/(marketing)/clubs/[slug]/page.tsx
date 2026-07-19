@@ -78,11 +78,15 @@ export default async function ClubDetailPage({
   }
 
   // 16C: community link reveal only for members of THIS club.
+  // 17A follow-up: prefer the drive-specific `recruitments.community_whatsapp_link`
+  // from the viewer's most recent accepted+published application over the
+  // club-level link. Keeps this page consistent with `/profile` My clubs.
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   let isMember = false;
+  let resolvedCommunityLink: string | null = club.community_whatsapp_link ?? null;
   if (user) {
     const { data: memberRow } = await supabase
       .from("club_members")
@@ -91,6 +95,26 @@ export default async function ClubDetailPage({
       .eq("profile_id", user.id)
       .maybeSingle();
     isMember = !!memberRow;
+
+    if (isMember) {
+      const { data: acceptedApps } = await supabase
+        .from("applications")
+        .select(
+          "recruitment:recruitments(community_whatsapp_link, results_published_at)",
+        )
+        .eq("profile_id", user.id)
+        .eq("club_id", club.id)
+        .eq("status", "accepted")
+        .order("updated_at", { ascending: false });
+      for (const raw of acceptedApps ?? []) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rec = (raw as any).recruitment;
+        if (rec?.community_whatsapp_link && rec?.results_published_at) {
+          resolvedCommunityLink = rec.community_whatsapp_link;
+          break;
+        }
+      }
+    }
   }
 
   const color = club.category?.color ?? "#5B52E0";
@@ -166,8 +190,10 @@ export default async function ClubDetailPage({
             <div className="rounded-xl bg-white px-4 py-3 text-center text-xs text-ink-soft">
               See open drives below to apply.
             </div>
-            {/* 16C: members-only community WhatsApp reveal */}
-            {isMember && club.community_whatsapp_link && (
+            {/* 16C: members-only community WhatsApp reveal.
+                17A: prefers drive-specific link when available (see resolve
+                above), falls back to club-level. */}
+            {isMember && resolvedCommunityLink && (
               <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-[#25D366]/30 bg-[#25D366]/5 px-3 py-2">
                 <div className="min-w-0">
                   <div className="text-[10px] font-medium uppercase tracking-wide text-ink-soft">
@@ -178,7 +204,7 @@ export default async function ClubDetailPage({
                   </div>
                 </div>
                 <WhatsAppLinkButton
-                  url={club.community_whatsapp_link}
+                  url={resolvedCommunityLink}
                   label={`${club.name} community group`}
                 />
               </div>

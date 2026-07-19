@@ -14,8 +14,10 @@ import {
   updateDrive,
   publishDrive,
   deleteDrive,
+  updateDriveCommunityLink,
   type DriveResult,
 } from "@/lib/actions/drive";
+import { useFormStatus } from "react-dom";
 import { TargetYearsPicker } from "@/components/admin/target-years-picker";
 import { QuestionBuilder } from "@/components/admin/question-builder";
 import { Modal } from "@/components/ui/modal";
@@ -79,6 +81,12 @@ export function DriveEditorForm({
   // the banner below warns admins in that case.
   const [interviewLink, setInterviewLink] = React.useState<string>(
     drive?.interview_whatsapp_link ?? "",
+  );
+  // 17A: optional drive-specific community link. Falls back to club-level
+  // link when null. Editable in ALL phases including result via a separate
+  // RPC (see ResultPhaseCommunityLinkForm below).
+  const [communityLink, setCommunityLink] = React.useState<string>(
+    drive?.community_whatsapp_link ?? "",
   );
 
   const [dirty, setDirty] = React.useState(false);
@@ -252,6 +260,37 @@ export function DriveEditorForm({
               </p>
             </div>
 
+            {/* 17A: drive-specific community WhatsApp link. In Result phase
+                the entire form is readOnly and cannot serialize this field
+                via the main `update_drive` RPC (which blocks result phase),
+                so the standalone editor lives OUTSIDE the main `<form>` —
+                see `<ResultPhaseCommunityLinkForm>` rendered below Section 1.
+                Nested `<form>` elements are invalid HTML + hydrate-error. */}
+            {phase !== "result" && (
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-ink">
+                  Community WhatsApp link{" "}
+                  <span className="text-[11px] font-normal text-ink-soft">
+                    (optional)
+                  </span>
+                </label>
+                <input
+                  name="communityWhatsappLink"
+                  type="url"
+                  value={communityLink}
+                  onChange={(e) => setCommunityLink(e.target.value)}
+                  disabled={readOnly}
+                  placeholder="https://chat.whatsapp.com/..."
+                  className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:bg-cream/40 disabled:text-ink-soft"
+                />
+                <p className="mt-1.5 text-[11px] text-ink-soft">
+                  Revealed to accepted members after publish. Falls back to the
+                  club-level community link if empty. Editable even after
+                  results are published.
+                </p>
+              </div>
+            )}
+
             <div>
               <label className="mb-2 block text-sm font-medium text-ink">
                 Who can apply? <span className="text-clay">*</span>
@@ -315,6 +354,20 @@ export function DriveEditorForm({
           </div>
         </div>
       </form>
+
+      {/* 17A: Result-phase community link editor — sibling of the main form,
+          not nested inside it. Renders only in result phase; other phases put
+          the field inline in Section 1 above. */}
+      {phase === "result" && isEdit && (
+        <div className="rounded-2xl border border-line bg-white p-5">
+          <ResultPhaseCommunityLinkForm
+            driveId={drive!.id}
+            clubSlug={clubSlug}
+            currentLink={communityLink}
+            onLinkChange={setCommunityLink}
+          />
+        </div>
+      )}
 
       {/* Section 2: Application questions */}
       {isEdit ? (
@@ -702,4 +755,77 @@ function computeWarnings(input: {
       : null;
 
   return { seniorRoleMismatch, deadlinePast, resultBeforeDeadline };
+}
+
+/* ============================================================================
+ * 17A — Result-phase community link edit
+ * ==========================================================================
+ * Post-publish, the whole drive is locked EXCEPT the community WhatsApp link
+ * (clubs may swap groups after members are added). This mini-form calls the
+ * `updateDriveCommunityLink` action which uses a dedicated RPC with no phase
+ * gate. Standalone form so it doesn't get sucked into the main drive-form
+ * submit which would fail against the result-phase-locked `update_drive` RPC.
+ * ========================================================================== */
+function ResultPhaseCommunityLinkForm({
+  driveId,
+  clubSlug,
+  currentLink,
+  onLinkChange,
+}: {
+  driveId: string;
+  clubSlug: string;
+  currentLink: string;
+  onLinkChange: (v: string) => void;
+}) {
+  const [state, formAction] = useActionState<DriveResult, FormData>(
+    updateDriveCommunityLink,
+    {},
+  );
+
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="driveId" value={driveId} />
+      <input type="hidden" name="__club_slug" value={clubSlug} />
+      <label className="mb-1.5 block text-sm font-medium text-ink">
+        Community WhatsApp link{" "}
+        <span className="text-[11px] font-normal text-ink-soft">
+          (editable post-publish)
+        </span>
+      </label>
+      <div className="flex gap-2">
+        <input
+          name="communityWhatsappLink"
+          type="url"
+          value={currentLink}
+          onChange={(e) => onLinkChange(e.target.value)}
+          placeholder="https://chat.whatsapp.com/..."
+          className="flex-1 rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo"
+        />
+        <SaveLinkBtn />
+      </div>
+      {state.error && (
+        <p className="mt-1 text-[11px] text-clay">{state.error}</p>
+      )}
+      {state.ok && (
+        <p className="mt-1 text-[11px] text-sport">Link saved.</p>
+      )}
+      <p className="mt-1.5 text-[11px] text-ink-soft">
+        Members see this link. Other fields on this drive are locked because
+        results are published.
+      </p>
+    </form>
+  );
+}
+
+function SaveLinkBtn() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="rounded-full bg-indigo px-4 py-2.5 text-sm font-medium text-indigo-fg hover:bg-indigo/90 disabled:opacity-60"
+    >
+      {pending ? "Saving…" : "Save"}
+    </button>
+  );
 }

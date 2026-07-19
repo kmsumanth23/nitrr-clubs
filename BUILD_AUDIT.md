@@ -1360,5 +1360,341 @@ Auth-based rendering on `/clubs/[slug]` couldn't stay pure ISR without a client-
 - Step 21 (question-edit data integrity)
 - Step 22 (drop `clubs.is_recruiting`)
 
+---
+
+# 17A — Polish + Drive-specific community link + My Clubs redesign
+
+Small-changes batch, one round. New schema for drive-scoped community link, drive editor gets the field with a post-publish carve-out, question editor auto-resize + `whitespace-pre-wrap` everywhere, and profile My Clubs redesigned to a 2-col card grid using `getMyMemberships` again.
+
+## Files moved (drop folder → destinations)
+
+| Origin (`files (7)/`) | Destination |
+|---|---|
+| `17a_drive_community_link.sql` | [supabase/17a_drive_community_link.sql](supabase/17a_drive_community_link.sql) |
+| `cleanup-test-members.sql` | [supabase/17a_cleanup_test_members.sql](supabase/17a_cleanup_test_members.sql) — renamed for step-aligned convention |
+| `my-clubs-list.tsx` | [components/profile/my-clubs-list.tsx](components/profile/my-clubs-list.tsx) — **rewritten before move** (see divergence #1) |
+
+## Files patched
+
+| File | Change |
+|---|---|
+| [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | Added `community_whatsapp_link` to `DriveListItem` + `DriveWithQuestions`, extended both SELECTs, updated mappers. |
+| [lib/queries/apply.ts](lib/queries/apply.ts) | Added `community_whatsapp_link` to `DriveForApply.drive`, SELECT, mapper. |
+| [lib/queries/profile.ts](lib/queries/profile.ts) | Added `community_whatsapp_link` to `MyApplication.recruitment`; extended `MyMembership.club` Pick to include `instagram_url`; **un-deprecated** `getMyMemberships` with a note about 17A + extended its SELECT with `instagram_url`. Intermediate type cast + mapper on `getMyApplications` also extended. |
+| [lib/validation/drive.ts](lib/validation/drive.ts) | New `optionalWhatsappLinkSchema` (nullable variant). Extended `createDriveSchema` and `updateDriveSchema` with optional `communityWhatsappLink`. New `updateDriveCommunityLinkSchema`. |
+| [lib/actions/drive.ts](lib/actions/drive.ts) | Imported new schema. `createDrive` + `updateDrive` read `communityWhatsappLink` from FormData and pass `community_whatsapp_link_in` to their RPCs. New action `updateDriveCommunityLink` at the bottom for the post-publish carve-out (uses new RPC). |
+| [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | New `communityLink` state. UI field inserted between the interview link and target years — but when `phase === "result"` the field renders as a standalone `<ResultPhaseCommunityLinkForm>` that submits via the dedicated action (main form is disabled in result phase). Added the sub-component + `<SaveLinkBtn>` helper at the bottom of the file. Added `useFormStatus` import. |
+| [components/admin/question-editor-row.tsx](components/admin/question-editor-row.tsx) | Added `textareaRef` + `useEffect([prompt])` for auto-resize. Textarea gets `whitespace-pre-wrap overflow-hidden` + `minHeight: 60px`. |
+| [components/clubs/apply-form.tsx](components/clubs/apply-form.tsx) | `whitespace-pre-wrap` on question label. |
+| [components/profile/application-row.tsx](components/profile/application-row.tsx) | `whitespace-pre-wrap` on `Q` label. (Read helper was removed in 16B; only label remains.) |
+| [components/admin/application-review-row.tsx](components/admin/application-review-row.tsx) | `whitespace-pre-wrap` on `ReadBlock` label. |
+| [app/(student)/profile/page.tsx](app/(student)/profile/page.tsx) | Switched query from `getMyProfileClubs` → `getMyMemberships`. Reordered sections: Profile details → **My clubs (2-col card grid via `<MyClubsList>`)** → My applications. Dropped the inline row rendering + `WhatsAppLinkButton`/`DecommissionedBadge` imports (component handles both). |
+| [lib/database.types.ts](lib/database.types.ts) | Manually added the `update_drive_community_link` RPC signature so the action call typechecks. Same pattern used for `application_notes` in 16B. |
+
+## Divergences from the patch spec (handled)
+
+1. **`club.socials.instagram` doesn't exist.** The patch expected a jsonb `socials` field on `clubs`, but the schema has `instagram_url` as a plain column. Rewrote the new `my-clubs-list.tsx` to read `club.instagram_url` directly and extended `MyMembership.club`'s Pick with `"instagram_url"` (not `socials`). The types-and-queries patch's `MyMembership` extension was adjusted to match reality.
+2. **Profile page uses `getMyProfileClubs`, not `getMyMemberships`.** The 14f unification made `/profile` show admin clubs too. 17A reverts that: the new My Clubs surface is members-only (via `club_members`). Admin-only users see their clubs on `/admin`. `getMyProfileClubs` and `MyProfileClub` are now dead code — queue for step 20 sweep alongside the earlier dead symbols.
+3. **Profile page had sections, not tabs.** The batch's "tab reorder" instructions translated to a JSX section reorder. The "Application tab / History tab" distinction doesn't apply — those already share one section (`ApplicationsList` partitions internally).
+4. **`update_drive_community_link` RPC not in generated types.** Same pattern as when we added `application_notes` in 16B: manually appended the RPC signature to `database.types.ts`. Regen via `supabase gen types` would overwrite consistently.
+5. **`useFormStatus` import.** The drive editor already imports React hooks from `"react"` but not `useFormStatus` from `"react-dom"` — added it. The `<SaveLinkBtn>` helper needs it.
+
+## RPC surface (17A additions)
+
+| RPC | Args (post-17A) | Phase gate |
+|---|---|---|
+| `create_drive` | 8 params (adds `community_whatsapp_link_in`) | Draft insert |
+| `update_drive` | 8 params (adds `community_whatsapp_link_in`) | Only `result` blocks (16B soft-gate + community link now editable via separate RPC) |
+| `update_drive_community_link` | `(drive_id_in, community_whatsapp_link_in)` | **No phase gate** — the whole point is post-publish edits |
+
+## Reveal semantics — updated for drive-specific link
+
+Existing 16C surfaces already read `interview_whatsapp_link` from the recruitment. The community link surfaces still read from `clubs.community_whatsapp_link`; the drive-scoped `recruitments.community_whatsapp_link` is fetched but the UI hookup for "prefer drive link over club link" is deferred to when the reveal source needs to differentiate (17B or later). For now the data flows through queries → UI unchanged.
+
+## Verifications
+
+- `npx tsc --noEmit` — clean after two follow-up fixes (drop-folder stale `my-clubs-list.tsx` deleted; `update_drive_community_link` RPC signature added to types).
+- Consumer-side grep for `getMyProfileClubs` — zero remaining live consumers. Symbol still exported (dead code queued for step 20).
+- No new migrations required beyond `17a_drive_community_link.sql`.
+
+## Not touched by 17A (still deferred)
+
+- Role tags on drives — 17B
+- Web-admin overlay icon on profiles — 17B
+- Member management edit-role UI — 17B
+- `club_members` schema changes — 17B (source_recruitment_id column)
+- Post-publish drive → members automatic routing to drive-specific community group — 17B
+- Question-edit data integrity — step 21
+
+## Smoke test order
+
+Apply the two SQL files first, then:
+1. Cleanup script — verify `club_members` count = 0, all four test admins intact.
+2. Create a new drive → new "Community WhatsApp link (optional)" field visible, saves without.
+3. Create with a community link → saves, drive detail shows it.
+4. Edit a published (`open` phase) drive → community link field editable inline, saves via `update_drive`.
+5. Publish results on a drive → editor now shows only the community link as editable (via `<ResultPhaseCommunityLinkForm>`). Other fields locked. Save the link → success message. Other fields still locked.
+6. Question editor: type a multi-line prompt with `-a` `-b` `-c` → textarea grows as you type; save; reopen page → renders with line breaks preserved on the applicant-side apply page.
+7. `/profile` — My clubs section first (below profile details), 2-col grid on desktop, 1-col on mobile. Quick link chips render: home, calendar, Instagram (if set), WhatsApp (if set). Tooltips on hover via `title` + `aria-label`.
+8. Empty state on `/profile` My clubs — helpful "explore all clubs" copy.
+
+Say "17A clean" and 17B ships next (role tags + web-admin overlay + member management).
+
+---
+
+## 17A — Addendum 1 (drive-scoped community link resolution + nested-form hydration fix + card polish)
+
+Post-smoke-test fixes surfaced two behavior bugs and one visual polish request.
+
+### Bug fix 1 — nested `<form>` hydration error on Result-phase drives
+
+- **Symptom:** clicking a published/result-phase drive threw a browser console error: `<form> cannot be a descendant of <form>` and a hydration warning.
+- **Root cause:** [drive-editor-form.tsx](components/admin/drive-editor-form.tsx) rendered `<ResultPhaseCommunityLinkForm>` (which has its own `<form>`) *inside* Section 1, which is inside the parent `<form id="drive-form">`. HTML forbids nested forms.
+- **Regression against Lesson 7** (nested forms cause hydration errors). Called out in CLAUDE.md, and I still did it.
+- **Fix:** the inline community-link `<input>` in Section 1 now only renders when `phase !== "result"`. For result-phase drives, `<ResultPhaseCommunityLinkForm>` is rendered as a **top-level sibling** of the main `<form>`, sitting between Section 1's closing `</form>` and Section 2 (Questions). Same visual position, no DOM nesting.
+
+### Bug fix 2 — accepted members saw the club-level community link, not the drive's
+
+- **Symptom:** admin sets `recruitments.community_whatsapp_link` on a specific drive, applicant is accepted, results published → the applicant's `/profile` My Clubs card and the club detail aside pill still showed the **club-level** `clubs.community_whatsapp_link` (or nothing when that was null). The drive-specific value was written to the DB but never surfaced.
+- **Root cause:** Batch 17A wired the drive-scoped column through admin editor + queries, but the **consumer** side (member's view) still read only `clubs.community_whatsapp_link`. The SETUP flagged this as "full membership routing → 17B" so we deferred it — but 17B is not strictly needed because `applications` already has enough info to derive the source drive.
+- **Fix (no schema change):** both consumer surfaces now resolve the link at query time.
+  - [lib/queries/profile.ts](lib/queries/profile.ts) `getMyMemberships`: after fetching memberships, runs a second query for accepted applications (`profile_id = auth.uid()`, `status = 'accepted'`, `club_id IN memberships`) ordered by `updated_at desc`. For each club, takes the newest published drive with a non-null `community_whatsapp_link` and overrides `club.community_whatsapp_link` on the returned `MyMembership`. Non-fatal on error — falls through to club-level.
+  - [app/(marketing)/clubs/[slug]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx): same lookup, single-club scope. New local `resolvedCommunityLink` variable feeds the aside pill.
+- **Semantic notes:**
+  - Only considers drives with `results_published_at IS NOT NULL` (defensive — membership only materializes on publish anyway, but explicit belt-and-braces).
+  - "Most recent" means most recently accepted per club; handles the re-apply-into-a-later-drive case cleanly.
+  - When the current drive has a null community link, we look further back for one that has it. Prevents "admin cleared the field on the newer drive, member loses their group" — falls back to the last drive that provided one, then club-level.
+
+### Polish — My Clubs card visuals
+
+User feedback: Instagram icon should be its brand color, quick-link icons a bit larger, club name bigger/bolder to match applications & history.
+
+- **Club name typography** — was `text-sm font-semibold text-ink`; now `font-display text-lg font-bold text-ink` matching the pattern used in [components/profile/application-row.tsx](components/profile/application-row.tsx).
+- **Icon chip size** — bumped `h-8 w-8` (32px) → `h-10 w-10` (40px). SVG icon size 14 → 18. `<WhatsAppLinkButton>` receives `size="md"` so all four chips are the same 40px scale.
+- **Instagram in brand pink** — added optional `iconClassName` prop to `<QuickLinkChip>`. Instagram chip passes `text-[#E4405F]` (Instagram's signature magenta). Icon stays pink even while the chip's neutral hover state runs.
+- **Chip gap** — `gap-1.5` → `gap-2` for slightly more air between the larger chips.
+
+### Verification
+
+- `npx tsc --noEmit` — clean after each of the three fixes.
+- No new migrations.
+- Two-query pattern in `getMyMemberships` follows the same shape as prior fixes (16B `getApplicationsForDrive` notes stitching, 16C drive-community-link on `/profile` My Clubs).
+
+---
+
+## 17A — Smoke test verdict
+
+**All eight smoke tests passed.** 🚀
+
+1. ✅ Cleanup script — `club_members` count = 0 after DELETE; all four test admins intact.
+2. ✅ Drive creation without a community link — saves; drive appears in list.
+3. ✅ Drive creation with a community link — saves; value persists to `recruitments.community_whatsapp_link`.
+4. ✅ Post-publish community link edit — `<ResultPhaseCommunityLinkForm>` surfaces below Section 1 (post-Addendum-1 fix), saves via `update_drive_community_link` RPC without touching other fields.
+5. ✅ Editor phase gating — Draft/Open/Review: full form editable inline; Result: only community link editable, everything else locked as designed.
+6. ✅ Question editor auto-resize + `whitespace-pre-wrap` on prompt display — multi-line prompts (`-a` `-b` `-c`) render with line breaks preserved on the applicant-side apply form.
+7. ✅ My Clubs redesign — 2-col card grid on desktop, 1-col on mobile; quick link chips functional; tooltips on hover.
+8. ✅ Section reorder — Profile details → My Clubs → My Applications, as specified.
+9. ✅ **Post-fix**: drive-scoped community link resolves correctly for accepted members on both `/profile` and `/clubs/[slug]`.
+10. ✅ **Post-fix**: nested-form hydration error gone; Result-phase drives load cleanly.
+
+**17A closed.** Ready for **17B** — role tags + web-admin overlay + member management.
+
+---
+
+# 17B.2 (design pre-write) — Departments per drive + ranked preferences
+
+Slotting between role_label (17B.1) and member management (17B.3). Design locked below so Sumanth's planning cycle can pick this up as-is when files (8) drops.
+
+## Overview
+
+Some clubs (e.g. Shaurya) run drives for a single role — "Head Coordinator" — but internally split it into departments: Event Management, Sports Coordinator, Sponsorship, PR, etc. Each department has its own WhatsApp community group. Applicants pick their preferred department(s) at apply time. Admins decide which department each accepted applicant is placed in.
+
+**Site-managing admins are unaffected** — departments are purely applicant-facing metadata. No permission implications.
+
+## Design decisions (locked)
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| **Scope** | Per-drive | Departments drift between drives; per-club global list adds admin surface for little gain. |
+| **Optional per drive?** | Yes | Not all drives have departments. Empty list → picker hidden on apply form. |
+| **Max preferences student can rank** | **Configurable per drive** via `max_department_choices` int column, defaults to 2. | User's ask — some drives may want up to 3-4 choices; hardcoding 2 forecloses that. |
+| **Selection style** | Ranked preferences (1st, 2nd, …, up to `max_department_choices`) | Common in college hiring flows; captures fit signal. |
+| **Admin accept-time department pick** | Defaults to student's 1st preference; **admin can override to any department the drive has**, including outside the student's preferences. | User's ask — admins sometimes move people around for fit. UI shows an "(overridden)" pill so it's auditable. |
+| **Post-accept department change** | Yes, allowed via a dedicated RPC (mirrors `update_drive_community_link` from 17A). Result phase is fine. | User's ask. |
+| **Department deletion after Open phase** | **Blocked** once any application references it (in `preferred_departments` OR `accepted_department_id`). Draft phase deletion is unrestricted. | User's ask; matches the existing "blocked once applications exist" pattern from `delete_drive` and `delete_drive_question`. |
+| **Drive deletion post-Result** | Already blocked at the DB level (`delete_drive` RPC throws in `review`/`result`). Confirmed at [supabase/16a_drive_rpcs.sql](supabase/16a_drive_rpcs.sql) — no change needed. | Existing safety. |
+
+## Schema
+
+```sql
+-- One row per department per drive. Optional per drive.
+create table drive_departments (
+  id                       uuid primary key default gen_random_uuid(),
+  recruitment_id           uuid not null references recruitments(id) on delete cascade,
+  name                     text not null,
+  community_whatsapp_link  text null,          -- per-dept community group
+  sort_order               int  not null default 0,
+  created_at               timestamptz not null default now(),
+  unique (recruitment_id, name)
+);
+
+-- How many preferences the student can rank on this drive
+-- (defaults to 2, admin can lift). Enforced client-side + at the trigger.
+alter table recruitments
+  add column max_department_choices int not null default 2
+    check (max_department_choices between 1 and 6);
+
+-- Applicant's ranked prefs + admin's placement decision
+alter table applications
+  add column preferred_departments  uuid[] null,     -- ordered; index 0 = 1st choice
+  add column accepted_department_id uuid null
+    references drive_departments(id) on delete restrict;
+    -- ON DELETE RESTRICT is the DB half of "block department deletion when
+    -- referenced"; RPC-level check gives the user-friendly error message.
+```
+
+**Constraint plans (RPC-level, not DB constraints):**
+- `preferred_departments` length ≤ `recruitments.max_department_choices` — validated in `submit_application` + `update_application`.
+- All UUIDs in `preferred_departments` must belong to the drive's departments — validated in the same RPCs.
+- No duplicates within `preferred_departments`.
+- `accepted_department_id`, if set, must belong to the drive's departments (any dept; not restricted to student's preferences).
+
+## RPCs to add / modify
+
+**New:**
+- `add_drive_department(drive_id, name, community_whatsapp_link) → uuid` — lead/manager/sysadmin. Draft or Open phase.
+- `update_drive_department(department_id, name, community_whatsapp_link)` — lead/manager/sysadmin. All phases (name edit is safe since UI-only; link edit needed post-publish for group swaps).
+- `delete_drive_department(department_id)` — lead/sysadmin. Blocked if `exists(select 1 from applications where department_id = any(preferred_departments) or accepted_department_id = department_id)`.
+- `swap_drive_department_order(id_a, id_b)` — lead/manager/sysadmin. Draft/Open only.
+- `set_accepted_department(application_id, department_id)` — lead/manager/sysadmin. All phases (result-phase carve-out mirrors `update_drive_community_link`).
+
+**Modified:**
+- `submit_application` / `update_application` — accepts `preferred_departments uuid[]`, validates length + membership + no-duplicates.
+- `create_drive` / `update_drive` — accepts `max_department_choices int`. Same generated-types-stale `as never` pattern for 8→9 params.
+- `publish_recruitment_results` — no change. `accepted_department_id` should be set BEFORE publish; RPC could raise if any accepted application has null `accepted_department_id` on drives with departments, defaulting to `preferred_departments[0]` at accept-time is the safer path.
+
+**RPC that decides accept-time default:**
+- When admin flips status to `accepted` on a drive with departments and `accepted_department_id IS NULL`, the status-flip action defaults it to `preferred_departments[0]`. If the student had no preferences (drive doesn't have departments), it stays null. Admin can override before publish via `set_accepted_department`.
+
+## WhatsApp community reveal — updated fallback chain
+
+Priority (first non-null wins):
+
+1. `drive_departments.community_whatsapp_link` for the member's `accepted_department_id`
+2. `recruitments.community_whatsapp_link` (17A — drive-level)
+3. `clubs.community_whatsapp_link` (16C — club-level)
+
+Both surfaces that resolve the community link ([lib/queries/profile.ts](lib/queries/profile.ts) `getMyMemberships` and [app/(marketing)/clubs/[slug]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx)) need extending. The lookup already fetches accepted applications; add `accepted_department_id` + a join on `drive_departments(community_whatsapp_link)` to the query.
+
+## UI: drive editor (admin)
+
+New collapsible section between "Community WhatsApp link" and "Who can apply?":
+
+```
+▼ Departments (optional) — 3 defined
+
+   Max preferences students can rank: [ 2 ▼ ]  (1–6)
+
+   ▤ Event Management       [ https://chat.whatsapp.com/… ]  ↑ ↓ ✕
+   ▤ Sports Coordinator     [ https://chat.whatsapp.com/… ]  ↑ ↓ ✕
+   ▤ Sponsorship            [ https://chat.whatsapp.com/… ]  ↑ ↓ ✕
+
+   [ + Add department ]
+```
+
+- Toggle at top expands/collapses.
+- Each row: name text input + optional WhatsApp link + reorder handles + delete.
+- Delete disabled with tooltip once any application references the department: "Cannot delete — X applicants have this in their preferences."
+- Reorder + delete disabled in review/result phases (matches question editor lock).
+
+## UI: apply form (student)
+
+New required section when drive has departments, shown between the applying-as card and the questions:
+
+```
+Rank your department preferences ( up to 2 )
+
+  1st choice *:  [ Event Management ▼ ]
+  2nd choice  :  [ Sports Coordinator ▼ ]   or [ None ]
+```
+
+- Rank 1 required; ranks 2..N optional.
+- Can't pick the same department twice (dropdowns filter out already-selected values).
+- Server-side validation via updated `submit_application` / `update_application` RPCs.
+
+## UI: admin review (application modal)
+
+- Applicant's preferences displayed as a stacked list under their name: `1. Event Mgmt · 2. Sports`.
+- Accept button → mini dropdown pops: **"Place in: [Event Mgmt ▼]"** (defaults to `preferred_departments[0]`, admin can override to any of the drive's departments including outside the student's preferences).
+- After acceptance: chosen department rendered as a pill on the row (`Placed: Event Mgmt`). If admin picked outside preferences, pill carries a small warning icon + tooltip: "Overridden — not in student's preferences."
+- Post-accept, a small "Change department" affordance opens a mini form that calls the dedicated `set_accepted_department` RPC. Same carve-out pattern as `update_drive_community_link` — works even in result phase.
+
+## UI: accepted member (`/profile` My Clubs card)
+
+- Category pill area shows department when set: e.g. `Coordinator · Event Mgmt` under club name.
+- WhatsApp icon links to the resolved community link (chain above).
+
+## Files that need touching (planning estimate)
+
+| File | Change |
+|---|---|
+| **`supabase/17b2_departments.sql`** (new) | Full migration: table + columns + all 5 new RPCs + modifications to `submit_application` / `update_application` / `create_drive` / `update_drive`. |
+| `lib/database.types.ts` | Manual RPC signature additions (same pattern as 16B `application_notes`, 17A `update_drive_community_link`). |
+| `lib/queries/admin-drives.ts` | `DriveWithQuestions` gets `departments: DriveDepartment[]` + `max_department_choices: number`. SELECT + mapper. |
+| `lib/queries/apply.ts` | `DriveForApply.drive` gets `departments` + `max_department_choices`. |
+| `lib/queries/profile.ts` | `MyApplication.recruitment` + accepted-application resolve extended. Community link resolver uses `accepted_department_id` first. |
+| `lib/queries/admin-applications.ts` | `AdminApplication` gets `preferred_departments: DriveDepartment[]` (resolved) + `accepted_department: DriveDepartment \| null` (resolved). |
+| `lib/validation/drive.ts` | New `departmentSchema` for the row; `createDriveSchema` / `updateDriveSchema` accept `maxDepartmentChoices`; new `setAcceptedDepartmentSchema`. |
+| `lib/validation/application.ts` | `preferredDepartments: uuid[]` validation in submit + update schemas; length + membership + no-dup checks. |
+| `lib/actions/drive.ts` | Pass `max_department_choices` through; new `addDriveDepartment` / `updateDriveDepartment` / `deleteDriveDepartment` / `swapDriveDepartmentOrder` actions. |
+| `lib/actions/application.ts` | Pass `preferred_departments` through; new `setAcceptedDepartment` action. |
+| `lib/actions/admin-application.ts` | On status flip to `accepted`, default `accepted_department_id = preferred_departments[0]` when drive has departments and student had ranked prefs. |
+| `components/admin/drive-editor-form.tsx` | New `<DepartmentsSection>` — collapsible, chip-list style. `<MaxChoicesPicker>` for the cap. Post-result: DepartmentsSection stays visible but disabled *except for* per-department WhatsApp link edits (mirror pattern of `<ResultPhaseCommunityLinkForm>`). |
+| `components/clubs/apply-form.tsx` | New `<DepartmentPreferences>` section, rendered only when `drive.departments.length > 0`. |
+| `components/admin/application-review-row.tsx` | Preferences list + accept-with-department mini form + post-accept "Change department" affordance. |
+| `components/profile/my-clubs-list.tsx` | Show department name under club name when set. |
+| `app/(marketing)/clubs/[slug]/page.tsx` | Community link resolver already touches accepted apps — extend join to fetch `accepted_department_id` + `drive_departments.community_whatsapp_link`. |
+
+## Order of operations (when this ships)
+
+1. **Backup** DB (git commit CLAUDE.md, snapshot Supabase).
+2. Apply `17b2_departments.sql`.
+3. Manually add RPC signatures to `database.types.ts`.
+4. Types + queries patch across the 5 query files.
+5. Validation + actions patch.
+6. Drive editor UI + apply form UI + admin review UI.
+7. Profile card + club detail resolver updates.
+8. `npx tsc --noEmit`.
+9. Smoke test.
+
+## Smoke test priorities
+
+1. **Draft drive** — add 3 departments with links; save `max_department_choices = 3`.
+2. **Publish** — students see the 3-dropdown picker with 3 ranks available.
+3. **Apply** — student ranks 2 out of 3; another student ranks 3.
+4. **Review** — admin sees ranked prefs; accepts one at default (1st pref), accepts another with override to a non-preferred department; overridden case shows the warning pill.
+5. **Post-publish** — accepted member sees their department name + department-specific WhatsApp link on `/profile` and `/clubs/[slug]`. Admin changes their department via the affordance → link + name update on member's view.
+6. **Deletion gates** — admin tries to delete a department once applications exist → RPC blocks with friendly message. Tries in draft phase → succeeds.
+7. **Fallback chain** — drive with departments but no per-dept link → falls back to drive-level link → falls back to club-level link.
+
+## What 17B.2 does NOT touch
+
+- Per-department admin permissions (a Sports Coordinator lead controlling only Sports applicants) — deferred; not requested.
+- Per-department capacity/quota (max 5 Sports accepts) — deferred; not requested.
+- Bulk placement (assign 10 accepted applicants to departments in one shot) — deferred.
+- Department-level analytics on sysadmin dashboard — deferred.
+
+## Coexistence + risks
+
+- **Existing drives** have no departments — behavior unchanged. Field only appears when drive has ≥1 department.
+- **Existing applications** get NULL `preferred_departments` + `accepted_department_id` — treated as "no department" everywhere. Fallback chain still works.
+- **RPC signature drift** — `submit_application`, `update_application`, `create_drive`, `update_drive` all get one more param. Same `as never` cast pattern as 16C/17A.
+- **Draft/Open dept editing** — admins can freely add/rename/reorder departments before applications exist. Once someone applies with a dept preference, deletion is blocked; renaming stays allowed (UI-only).
+- **What if student's 1st preference gets renamed after they applied?** Their `preferred_departments[0]` still resolves to the same UUID; UI shows the new name. Safe.
+
+---
+
+That's the full plan. Hand this to Sumanth (or fold it into files (8) directly) and it should be ready to build.
+
 
 

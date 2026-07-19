@@ -170,7 +170,7 @@ function Snap({ label, value }: { label: string; value?: string | null }) {
 function ReadBlock({ label, value }: { label: string; value?: string }) {
   return (
     <div>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-soft">
+      <div className="whitespace-pre-wrap text-[11px] font-medium uppercase tracking-wide text-ink-soft">
         {label}
       </div>
       <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{value || "—"}</p>

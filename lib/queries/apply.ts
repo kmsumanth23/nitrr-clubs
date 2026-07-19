@@ -137,6 +137,7 @@ export interface DriveForApply {
     target_years: number[];
     deadline: string | null;
     interview_whatsapp_link: string | null; // 16C
+    community_whatsapp_link: string | null; // 17A
     phase: Phase;
     questions: DriveQuestionForApply[];
   };
@@ -168,6 +169,7 @@ export async function getDriveForApply(
     .select(
       `id, club_id, name, description, target_years, deadline, result_date,
        published_at, results_published_at, interview_whatsapp_link,
+       community_whatsapp_link,
        club:clubs(slug),
        drive_questions(id, prompt, question_type, sort_order, required)`,
     )
@@ -216,6 +218,7 @@ export async function getDriveForApply(
       target_years: targetYears,
       deadline: r.deadline,
       interview_whatsapp_link: r.interview_whatsapp_link ?? null, // 16C
+      community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
       phase,
       questions: (r.drive_questions ?? []).map(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
