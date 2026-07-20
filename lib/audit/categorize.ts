@@ -33,7 +33,13 @@ const DRIVE_ACTIONS = new Set([
   "delete_drive",
 ]);
 const SUPER_ADMIN_ACTIONS = new Set(["set_super_admin"]);
-const MEMBER_ACTIONS = new Set(["publish_results", "remove_member"]);
+const MEMBER_ACTIONS = new Set([
+  "publish_results",
+  "remove_member",
+  "bulk_promote_members", // 17B
+  "update_member_role", // 17B
+  "toggle_member_exclude_from_promote", // 17B
+]);
 
 export function actionToCategory(action: string): AuditCategory {
   if (CLUB_ADMIN_ACTIONS.has(action)) return "club_admins";

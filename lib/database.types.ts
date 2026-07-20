@@ -248,21 +248,33 @@ export type Database = {
       club_members: {
         Row: {
           club_id: string
+          exclude_from_promote: boolean
           id: string
           joined_at: string
           profile_id: string
+          role: string
+          role_label: string | null
+          source_recruitment_id: string | null
         }
         Insert: {
           club_id: string
+          exclude_from_promote?: boolean
           id?: string
           joined_at?: string
           profile_id: string
+          role?: string
+          role_label?: string | null
+          source_recruitment_id?: string | null
         }
         Update: {
           club_id?: string
+          exclude_from_promote?: boolean
           id?: string
           joined_at?: string
           profile_id?: string
+          role?: string
+          role_label?: string | null
+          source_recruitment_id?: string | null
         }
         Relationships: [
           {
@@ -277,6 +289,13 @@ export type Database = {
             columns: ["profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "club_members_source_recruitment_id_fkey"
+            columns: ["source_recruitment_id"]
+            isOneToOne: false
+            referencedRelation: "recruitments"
             referencedColumns: ["id"]
           },
         ]
@@ -624,6 +643,7 @@ export type Database = {
       recruitments: {
         Row: {
           club_id: string
+          community_whatsapp_link: string | null
           created_at: string
           created_by: string | null
           deadline: string | null
@@ -636,10 +656,13 @@ export type Database = {
           result_date: string | null
           results_published_at: string | null
           results_published_by: string | null
+          role_label: string | null
+          role_on_accept: string
           target_years: number[]
         }
         Insert: {
           club_id: string
+          community_whatsapp_link?: string | null
           created_at?: string
           created_by?: string | null
           deadline?: string | null
@@ -652,10 +675,13 @@ export type Database = {
           result_date?: string | null
           results_published_at?: string | null
           results_published_by?: string | null
+          role_label?: string | null
+          role_on_accept?: string
           target_years?: number[]
         }
         Update: {
           club_id?: string
+          community_whatsapp_link?: string | null
           created_at?: string
           created_by?: string | null
           deadline?: string | null
@@ -668,6 +694,8 @@ export type Database = {
           result_date?: string | null
           results_published_at?: string | null
           results_published_by?: string | null
+          role_label?: string | null
+          role_on_accept?: string
           target_years?: number[]
         }
         Relationships: [
@@ -712,6 +740,10 @@ export type Database = {
         }
         Returns: string
       }
+      bulk_promote_members: {
+        Args: { club_id_in: string; member_selections: Json }
+        Returns: number
+      }
       can_edit_club_content: { Args: { target_club: string }; Returns: boolean }
       can_manage_admins: { Args: { target_club: string }; Returns: boolean }
       can_manage_applications: {
@@ -743,11 +775,14 @@ export type Database = {
       create_drive: {
         Args: {
           club_id_in: string
+          community_whatsapp_link_in: string
           deadline_in: string
           description_in: string
           interview_whatsapp_link_in: string
           name_in: string
           result_date_in: string
+          role_label_in: string
+          role_on_accept_in: string
           target_years_in: number[]
         }
         Returns: string
@@ -857,23 +892,27 @@ export type Database = {
         Args: { id_a: string; id_b: string }
         Returns: undefined
       }
+      toggle_member_exclude_from_promote: {
+        Args: { club_id_in: string; exclude_in: boolean; profile_id_in: string }
+        Returns: undefined
+      }
       update_drive: {
         Args: {
+          community_whatsapp_link_in: string
           deadline_in: string
           description_in: string
           drive_id_in: string
           interview_whatsapp_link_in: string
           name_in: string
           result_date_in: string
+          role_label_in: string
+          role_on_accept_in: string
           target_years_in: number[]
         }
         Returns: undefined
       }
       update_drive_community_link: {
-        Args: {
-          community_whatsapp_link_in: string | null
-          drive_id_in: string
-        }
+        Args: { community_whatsapp_link_in: string; drive_id_in: string }
         Returns: undefined
       }
       update_drive_question: {
@@ -882,6 +921,15 @@ export type Database = {
           question_id_in: string
           question_type_in: string
           required_in: boolean
+        }
+        Returns: undefined
+      }
+      update_member_role: {
+        Args: {
+          club_id_in: string
+          profile_id_in: string
+          role_in: string
+          role_label_in: string
         }
         Returns: undefined
       }

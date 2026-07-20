@@ -34,6 +34,27 @@ function revalidateDrive(clubSlug: string, driveId?: string) {
   revalidatePath(`/admin/clubs/${clubSlug}`);
 }
 
+/** 17B: on `updateDrive`, an empty/absent `roleOnAccept` from FormData means
+ *  "the UI didn't offer this field" (pre-Batch-2). Pass `null` so the RPC's
+ *  coalesce-preserve keeps the drive's existing value instead of Zod's
+ *  default kicking in and writing 'volunteer'. */
+function readRoleOrNull(formData: FormData): string | null {
+  const raw = formData.get("roleOnAccept");
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/** 17B: same intent for `roleLabel` — absent/empty → null → RPC preserves.
+ *  Explicit clear of a custom label happens via the member-side action once
+ *  Batch 2 ships; drive-side just leaves the field alone when missing. */
+function readRoleLabelOrNull(formData: FormData): string | null {
+  const raw = formData.get("roleLabel");
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 // ============================================================================
 // 1. createDrive — creates in DRAFT mode + auto-populates 3 default questions
 // ============================================================================
@@ -54,6 +75,8 @@ export async function createDrive(
     resultDate: (formData.get("resultDate") as string) ?? "",
     interviewWhatsappLink: formData.get("interviewWhatsappLink") ?? "",
     communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
+    roleOnAccept: formData.get("roleOnAccept") ?? undefined, // 17B — Zod default kicks in when undefined
+    roleLabel: formData.get("roleLabel") ?? "",
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -70,6 +93,8 @@ export async function createDrive(
     result_date_in: parsed.data.resultDate,
     interview_whatsapp_link_in: parsed.data.interviewWhatsappLink, // 16C
     community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null, // 17A
+    role_on_accept_in: parsed.data.roleOnAccept, // 17B
+    role_label_in: parsed.data.roleLabel ?? null, // 17B
   } as never);
   if (error) {
     console.error("createDrive rpc failed:", error);
@@ -118,6 +143,13 @@ export async function updateDrive(
     resultDate: (formData.get("resultDate") as string) ?? "",
     interviewWhatsappLink: formData.get("interviewWhatsappLink") ?? "",
     communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
+    // 17B (defensive): pre-Batch-2 UI doesn't render these fields at all, so
+    // pass null when they're truly absent. The RPC's coalesce-preserve keeps
+    // the drive's existing role_on_accept / role_label unchanged. When Batch
+    // 2 ships and the dropdown is in, `formData.has(...)` returns true and
+    // the actual value flows through.
+    roleOnAccept: readRoleOrNull(formData),
+    roleLabel: readRoleLabelOrNull(formData),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -132,6 +164,9 @@ export async function updateDrive(
     result_date_in: parsed.data.resultDate,
     interview_whatsapp_link_in: parsed.data.interviewWhatsappLink, // 16C
     community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null, // 17A
+    // 17B: null means "preserve existing" — see helpers + updateDriveSchema.
+    role_on_accept_in: parsed.data.roleOnAccept ?? null,
+    role_label_in: parsed.data.roleLabel ?? null,
   } as never);
   if (error) {
     console.error("updateDrive rpc failed:", error);

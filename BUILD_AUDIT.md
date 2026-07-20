@@ -1696,5 +1696,152 @@ Rank your department preferences ( up to 2 )
 
 That's the full plan. Hand this to Sumanth (or fold it into files (8) directly) and it should be ready to build.
 
+---
+
+# 17B Batch 1 — Server layer for role tags on drives and members
+
+Scope: schema + all RPCs + queries + validation + actions + audit categorization + audit sentence templates. UI deferred to Batch 2. Goal was set via `/goal` with a Stop hook and executed autonomously.
+
+**Note:** the design conversation captured just above assumed step 17B would be split into role_tags → then a separate departments step. Sumanth's actual STEP_17B_SPEC.md scoped 17B narrowly to **role tags only**; departments-per-drive (with `max_department_choices`, ranked preferences, per-department WhatsApp) stays queued as its own future step. The 17B.2 pre-write above still applies to that future step — just not to this batch.
+
+## Feature summary (as shipped)
+
+- Structural role enum on `club_members.role`: `volunteer | coordinator | core_coordinator | head_coordinator | overall_coordinator` (default `volunteer`).
+- Custom display `role_label` on drives + members; falls back to per-role default label via `displayRoleLabel()`.
+- Membership materialization on publish now snapshots `role`, `role_label`, and `source_recruitment_id` from the drive.
+- `source_recruitment_id` back-link on members replaces the 17A two-query community-link resolver with a single embedded join.
+- Advisory year mapping (volunteer→1, coordinator→2, core→3, head→4, overall→4) surfaces as a **soft warning only** in the drive editor. Never blocking.
+- Web-admin overlay: `MyMembership.admin_tier` joins `club_admins.admin_role` so Batch 2 can render a second pill on My Clubs cards.
+- Bulk promotion at cycle end via `bulk_promote_members` RPC (accepts JSONB array of `{profile_id, new_role}` pairs, atomic per-transaction).
+- Individual role edits via `update_member_role`; excluded-from-promote toggle via `toggle_member_exclude_from_promote`.
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| new | [supabase/17b_role_tags.sql](supabase/17b_role_tags.sql) | 4 columns on `club_members` (role, role_label, exclude_from_promote, source_recruitment_id + FK to recruitments ON DELETE SET NULL); 2 columns on `recruitments` (role_on_accept, role_label). Rewritten `create_drive` (10 params) + `update_drive` (10 params) + `publish_recruitment_results`. Three new RPCs. All 6 grants co-located. |
+| new | [lib/roles.ts](lib/roles.ts) | `ROLE_ENUM` + `ROLE_DEFAULT_LABELS` + `ROLE_ADVISORY_YEAR` + `ROLE_PROMOTION_NEXT` + `displayRoleLabel()` + `roleYearAdvisory()`. |
+| new | [lib/validation/member.ts](lib/validation/member.ts) | `updateMemberRoleSchema`, `toggleExcludeSchema`, `bulkPromoteSchema`. |
+| patch | [lib/actions/member.ts](lib/actions/member.ts) | Preserved existing `removeMember` + `MemberResult`. Added `updateMemberRole`, `toggleMemberExclude`, `bulkPromoteMembers`. `MemberResult` gained optional `promoted_count` field. `MemberActionResult` exported as alias for spec-name compatibility. |
+| patch | [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | `role_on_accept` + `role_label` on `DriveListItem` and `DriveWithQuestions`. SELECT + mapper updates in both `listDrivesForClub` and `getDriveWithQuestions`. |
+| patch | [lib/queries/apply.ts](lib/queries/apply.ts) | Same fields on `DriveForApply.drive`. SELECT + mapper. |
+| patch | [lib/queries/profile.ts](lib/queries/profile.ts) | `MyMembership` extended with `role`, `role_label`, `exclude_from_promote`, `admin_tier`. **17A two-query community-link resolver replaced** with a single embedded join on `source_recruitment:recruitments!club_members_source_recruitment_id_fkey(community_whatsapp_link)`. `admin_tier` fetched via a second scoped `club_admins` query (bulk lookup, non-fatal). `MyMembership.club` Pick extended with `"id"` for Batch 2's admin-page linking. |
+| patch | [lib/queries/admin-members.ts](lib/queries/admin-members.ts) | `ClubMemberView` extended with role columns + exclude flag + source_recruitment_id. New alias `export type MembershipDetail = ClubMemberView` for spec-name compatibility. New `getMembersGroupedByRole(clubId)` returns ordered `[{role, members[]}]` in `overall → head → core → coordinator → volunteer` order, empty roles omitted. |
+| patch | [lib/validation/drive.ts](lib/validation/drive.ts) | `roleOnAccept: z.enum(ROLE_ENUM).default("volunteer")` + `roleLabel: z.string().trim().max(100).optional().nullable()` on both `createDriveSchema` and `updateDriveSchema`. Import `ROLE_ENUM` from `@/lib/roles`. |
+| patch | [lib/actions/drive.ts](lib/actions/drive.ts) | `createDrive` + `updateDrive` read `roleOnAccept` and `roleLabel` from FormData; pass `role_on_accept_in` and `role_label_in` to the respective RPCs. `as never` cast pattern preserved. |
+| patch | [lib/audit/categorize.ts](lib/audit/categorize.ts) | Added `bulk_promote_members`, `update_member_role`, `toggle_member_exclude_from_promote` to `MEMBER_ACTIONS`. |
+| patch | [lib/audit/format.tsx](lib/audit/format.tsx) | Three new `switch` cases with human-readable sentences. Preserved existing formatter shape. |
+| patch | [lib/database.types.ts](lib/database.types.ts) | Added 3 new RPC signatures (`bulk_promote_members`, `toggle_member_exclude_from_promote`, `update_member_role`) in alphabetical position. Extended `club_members` Row/Insert/Update with 4 new columns + new FK relationship to `recruitments`. Extended `recruitments` Row/Insert/Update with `community_whatsapp_link` (backfilling the 17A gap in the generated types), `role_on_accept`, `role_label`. |
+
+## Deviations from the spec
+
+1. **`MembershipDetail` vs `ClubMemberView`.** Existing exported type has always been `ClubMemberView` in `admin-members.ts`. Renaming would ripple through consumers. Kept the original + added `export type MembershipDetail = ClubMemberView` alias so both names work.
+2. **`MemberActionResult` naming.** Spec's Batch 1 sample used `MemberActionResult`; the pre-existing file used `MemberResult`. Unified: `MemberResult` is canonical (added optional `promoted_count`), `MemberActionResult` is a type alias.
+3. **`admin_tier` uses a second query, not an embedded join.** Two-query pattern is Lesson 28-compliant and non-fatal on error (falls through with `admin_tier = null`). Cost: one extra scoped round-trip.
+4. **`admin-applications.ts` not touched.** Spec called it "defensive" and conditional. The drive header reads from `DriveWithQuestions` (already extended) so the flow is transitive.
+
+## Spec ambiguities resolved
+
+- **Zod `.default()` + `formData.get()` returning `null`.** For `roleOnAccept`, Zod's default only kicks in when the field is truly `undefined`, not on empty string (which would fail the enum check). Passed `formData.get("roleOnAccept") ?? undefined` in the actions. Same shape for `roleLabel`.
+- **`MyMembership.club` needed `id`.** Added `"id"` to the Pick — Batch 2 UI may want to link from My Clubs cards to `/admin/clubs/[slug]` where the club's UUID is the natural key. Zero cost, forward-compat.
+- **`recruitments.community_whatsapp_link` was missing from generated types (17A gap).** Added while I was in `database.types.ts`. Same for `role_on_accept` / `role_label`. Prevents shape drift on next `supabase gen types` regen.
+
+## Interaction with 17A
+
+The 17A drive-scoped community link fallback was implemented as a two-query pattern because `club_members` had no back-link to the source drive. With 17B introducing `source_recruitment_id`, `getMyMemberships` now uses a **direct embedded join** on that FK. Fallback chain per row is unchanged (drive-specific → club-level), but the second query is gone. Simpler, one fewer round-trip, same semantics.
+
+## Grants (co-located per Lesson 16)
+
+Six `grant execute` statements, all in `17b_role_tags.sql`:
+- `create_drive(uuid, text, text, int[], timestamptz, timestamptz, text, text, text, text)` (10 params, replaces 17A's 8-param)
+- `update_drive(uuid, text, text, int[], timestamptz, timestamptz, text, text, text, text)` (10 params, replaces 17A's 8-param)
+- `publish_recruitment_results(uuid)` (unchanged signature, updated body)
+- `update_member_role(uuid, uuid, text, text)`
+- `toggle_member_exclude_from_promote(uuid, uuid, boolean)`
+- `bulk_promote_members(uuid, jsonb)`
+
+## Verification
+
+- `npx tsc --noEmit` — clean (exit 0) after all patches applied.
+- No new lint hints introduced (dead-imports sweep clean).
+- Dead code queued for step 20 (`getMyProfileClubs`, `MyProfileClub`) intentionally left in place.
+
+## To apply
+
+The SQL migration cannot be executed from here. In Supabase SQL Editor:
+
+1. Apply [supabase/17b_role_tags.sql](supabase/17b_role_tags.sql).
+2. Run the sanity queries from the report (column checks + grant checks + RPC smoke tests) — full copy in the goal report above the audit and in the file's commented sanity-check block.
+3. Existing rows in `club_members` get `role = 'volunteer'` by default (safe — the schema DEFAULT applies).
+4. Existing rows in `recruitments` get `role_on_accept = 'volunteer'` by default.
+
+## What Batch 1 does NOT touch
+
+- Any UI wiring (Batch 2 handles drive editor role dropdown, member row role display, member edit modal, bulk-promote modal, members-page grouped display, MyClubsList role tag + web-admin overlay).
+- `admin-applications.ts` (transitively updated via `DriveWithQuestions`).
+- Public club team display (deferred to step 21 per the spec's explicit non-goals).
+- `remove_member` behavior (untouched).
+- `applications` schema (untouched).
+- `club_team` table (unrelated).
+- `club_admins.admin_role` structure (web-admin tiers are separate from member roles).
+
+Say **"17B Batch 1 clean"** after applying the SQL + running the smoke tests, and Batch 2 (UI layer) ships next.
+
+---
+
+## 17B Batch 1 — Addendum 1 (interstitial clobber fix on `update_drive`)
+
+Surfaced during the manual RPC smoke test. **Not a regression in the RPC itself** — RPC + schema chain proved correct end-to-end (`role = 'coordinator'`, `source_recruitment_id` matches drive UUID). But the smoke test's first attempt came back with `role = 'volunteer'` because the drive's `role_on_accept` had silently been overwritten between the SQL patch (`update recruitments set role_on_accept = 'coordinator'`) and the publish-results step.
+
+### Root cause
+
+Between Batch 1 landing and Batch 2 landing, the drive editor UI doesn't render the role dropdown yet. Any submit to `update_drive` from that UI sends no `roleOnAccept` field. My Batch 1 action did:
+
+```ts
+roleOnAccept: formData.get("roleOnAccept") ?? undefined, // Zod default kicks in
+```
+
+`formData.get(...)` returns `null` when the field is absent → `null ?? undefined = undefined` → Zod's `.default("volunteer")` fires → RPC receives `'volunteer'` → `role_on_accept` gets overwritten to `'volunteer'`. Any `Save changes` click on an unchanged drive editor form silently clobbers the role. Publish-results then snapshots the clobbered value onto the new member.
+
+This is a real interstitial-period bug for any admin who edits a drive between Batch 1 and Batch 2, not just a test artifact.
+
+### Fix (two-part, symmetric)
+
+**RPC side** — treat null/empty caller input as "preserve existing":
+
+- New file: [supabase/17b_role_preserve_patch.sql](supabase/17b_role_preserve_patch.sql) — `create or replace function update_drive(...)` with the same signature but new body. `role_on_accept` update uses `coalesce(nullif(trim(coalesce(role_on_accept_in, '')), ''), role_on_accept)` so null/empty leaves the column alone. `role_label` uses a `case when role_label_in is null then role_label else nullif(trim(role_label_in), '') end` — null preserves, empty explicitly clears.
+- `create_drive` behavior unchanged — new drives default `role_on_accept` to `'volunteer'` because there's no prior value to preserve.
+
+**Action side** — send explicit null, not Zod-default `'volunteer'`:
+
+- [lib/validation/drive.ts](lib/validation/drive.ts) — `updateDriveSchema.roleOnAccept` changed from `.default("volunteer")` to `.optional().nullable()`. `createDriveSchema.roleOnAccept` unchanged.
+- [lib/actions/drive.ts](lib/actions/drive.ts) — new helpers `readRoleOrNull(formData)` + `readRoleLabelOrNull(formData)` return `string | null` (trimmed value or null when absent/empty). `updateDrive` uses them; passes `parsed.data.roleOnAccept ?? null` and `parsed.data.roleLabel ?? null` to the RPC. `createDrive` still reads via `formData.get(...) ?? undefined` so its default fires as before.
+
+### Semantics
+
+| Caller | roleOnAccept value at RPC | Outcome |
+|---|---|---|
+| Batch 1 UI (field absent) | `null` | `update_drive` preserves existing `role_on_accept`. |
+| Batch 2 UI (user picked `'coordinator'`) | `'coordinator'` | RPC writes `'coordinator'`. |
+| Batch 2 UI (user picked `'volunteer'`) | `'volunteer'` | RPC writes `'volunteer'` (explicit). |
+| Direct SQL / other client (empty string) | `null` (helper coerces) | RPC preserves. |
+| `create_drive` with null | (Zod default fires) `'volunteer'` | RPC writes `'volunteer'` — new drive baseline. |
+
+### Verification
+
+- `npx tsc --noEmit` — clean.
+- Manual smoke test after applying [supabase/17b_role_preserve_patch.sql](supabase/17b_role_preserve_patch.sql):
+  1. Reset the test drive: `update recruitments set role_on_accept = 'coordinator', results_published_at = null, results_published_by = null where id = '<drive_id>'::uuid;`
+  2. Delete the wrong `club_members` row.
+  3. Go straight to `/admin/clubs/<slug>/applications` and publish results.
+  4. Verify `club_members.role = 'coordinator'`.
+- Confirmed by user: `role = 'coordinator'`, `role_label = null`, `source_recruitment_id = c7b85a8e-...`. ✅
+
+### To apply
+
+The migration hasn't been executed here — it can't be from this environment. Apply [supabase/17b_role_preserve_patch.sql](supabase/17b_role_preserve_patch.sql) in the SQL editor (it's just a `create or replace function update_drive(...)` + grant). No schema changes, idempotent.
+
+Once applied, edit any drive through the current UI to confirm `role_on_accept` no longer resets to `'volunteer'` on save.
+
 
 

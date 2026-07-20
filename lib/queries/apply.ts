@@ -138,6 +138,8 @@ export interface DriveForApply {
     deadline: string | null;
     interview_whatsapp_link: string | null; // 16C
     community_whatsapp_link: string | null; // 17A
+    role_on_accept: string; // 17B
+    role_label: string | null; // 17B
     phase: Phase;
     questions: DriveQuestionForApply[];
   };
@@ -169,7 +171,7 @@ export async function getDriveForApply(
     .select(
       `id, club_id, name, description, target_years, deadline, result_date,
        published_at, results_published_at, interview_whatsapp_link,
-       community_whatsapp_link,
+       community_whatsapp_link, role_on_accept, role_label,
        club:clubs(slug),
        drive_questions(id, prompt, question_type, sort_order, required)`,
     )
@@ -219,6 +221,8 @@ export async function getDriveForApply(
       deadline: r.deadline,
       interview_whatsapp_link: r.interview_whatsapp_link ?? null, // 16C
       community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
+      role_on_accept: r.role_on_accept ?? "volunteer", // 17B
+      role_label: r.role_label ?? null, // 17B
       phase,
       questions: (r.drive_questions ?? []).map(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

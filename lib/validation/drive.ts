@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROLE_ENUM } from "@/lib/roles";
 
 /** Target years must be non-empty subset of {1,2,3,4} with no duplicates. */
 const targetYearsSchema = z
@@ -69,6 +70,8 @@ export const createDriveSchema = z.object({
   resultDate: nullableDatetime,
   interviewWhatsappLink: whatsappLinkSchema, // 16C: mandatory
   communityWhatsappLink: optionalWhatsappLinkSchema.optional(), // 17A: optional
+  roleOnAccept: z.enum(ROLE_ENUM).default("volunteer"), // 17B
+  roleLabel: z.string().trim().max(100).optional().nullable(), // 17B
 });
 
 export type CreateDriveInput = z.infer<typeof createDriveSchema>;
@@ -83,6 +86,14 @@ export const updateDriveSchema = z.object({
   resultDate: nullableDatetime,
   interviewWhatsappLink: whatsappLinkSchema, // 16C: mandatory
   communityWhatsappLink: optionalWhatsappLinkSchema.optional(), // 17A: optional
+  // 17B (defensive): no default on the update side — null means "preserve
+  // existing" and the RPC's coalesce-preserve leaves the column alone.
+  // Batch 2 UI always sends an explicit value; Batch 1 UI omits the field
+  // entirely so passing null prevents the interstitial clobber-to-'volunteer'.
+  // `createDriveSchema` keeps its `.default("volunteer")` — new drives don't
+  // have a prior value to preserve.
+  roleOnAccept: z.enum(ROLE_ENUM).optional().nullable(), // 17B
+  roleLabel: z.string().trim().max(100).optional().nullable(), // 17B
 });
 
 /** 17A: post-publish carve-out — only community link is editable via the

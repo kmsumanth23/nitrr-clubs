@@ -187,6 +187,56 @@ export function formatAuditEntry(entry: AuditEntry): {
       };
     }
 
+    // 17B — Role management
+    case "bulk_promote_members": {
+      const promotedCount = (details.promoted_count as number) ?? 0;
+      return {
+        label: "Members promoted",
+        sentence: (
+          <>
+            <strong>{actor}</strong> bulk-promoted {promotedCount} member
+            {promotedCount === 1 ? "" : "s"}
+          </>
+        ),
+      };
+    }
+
+    case "update_member_role": {
+      const role = (details.role as string) ?? "?";
+      const label = (details.role_label as string) ?? null;
+      return {
+        label: "Member role changed",
+        sentence: (
+          <>
+            <strong>{actor}</strong> changed <strong>{target ?? "a member"}</strong>
+            {"'s role to "}
+            <em>{role}</em>
+            {label && (
+              <>
+                {" "}
+                (labelled <em>{label}</em>)
+              </>
+            )}
+          </>
+        ),
+      };
+    }
+
+    case "toggle_member_exclude_from_promote": {
+      const excluded = !!details.exclude;
+      return {
+        label: excluded ? "Member excluded from promotion" : "Member included in promotion",
+        sentence: (
+          <>
+            <strong>{actor}</strong>{" "}
+            {excluded ? "excluded" : "included"}{" "}
+            <strong>{target ?? "a member"}</strong>{" "}
+            {excluded ? "from" : "in"} the next bulk promotion
+          </>
+        ),
+      };
+    }
+
     default:
       return {
         label: entry.action,

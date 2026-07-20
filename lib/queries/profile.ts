@@ -26,10 +26,20 @@ export interface MyApplication extends Application {
 export interface MyMembership {
   club_id: string;
   joined_at: string;
+  /** 17B: structural role (enum). */
+  role: string;
+  /** 17B: custom label snapshot; falls back to default label for the role. */
+  role_label: string | null;
+  /** 17B: UI-only flag — filtered out of the bulk-promote picker by default. */
+  exclude_from_promote: boolean;
+  /** 17B: when this member also holds a web-admin tier on the same club,
+   *  render a second pill on their My Clubs card. Null when they're just a
+   *  member. Values match `club_admins.admin_role` — `lead`/`manager`/`editor`. */
+  admin_tier: string | null;
   club:
     | (Pick<
         Club,
-        "name" | "slug" | "archived_at" | "community_whatsapp_link" | "instagram_url"
+        "id" | "name" | "slug" | "archived_at" | "community_whatsapp_link" | "instagram_url"
       > & {
         category: Category | null;
       })
@@ -246,11 +256,14 @@ export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
  *  /profile. Members-only view (users with a `club_members` row). Admin-only
  *  users see their clubs on /admin instead.
  *
- *  17A follow-up: resolves `community_whatsapp_link` to the drive-specific
- *  value when the member's most recent accepted application has one on its
- *  drive. Falls back to the club-level link otherwise. Avoids the schema
- *  change to `club_members.source_recruitment_id` that was deferred to 17B —
- *  the applications table already has enough info to derive this. */
+ *  17B: replaces the 17A two-query drive-scoped community link resolver with a
+ *  single embedded join on `source_recruitment_id`. Fallback chain per row:
+ *    1. source_recruitment.community_whatsapp_link  (drive-specific)
+ *    2. club.community_whatsapp_link                (club-level)
+ *
+ *  Also fetches `admin_tier` for the web-admin overlay pill via a second
+ *  scoped query on `club_admins` (embedding it in the same select doesn't
+ *  disambiguate cleanly since we're keying by profile_id, not FK). */
 export async function getMyMemberships(): Promise<MyMembership[]> {
   const supabase = await createClient();
   const {
@@ -261,51 +274,60 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
   const { data, error } = await supabase
     .from("club_members")
     .select(
-      "club_id, joined_at, club:clubs(name, slug, community_whatsapp_link, instagram_url, archived_at, category:categories(*))",
+      `club_id, joined_at, role, role_label, exclude_from_promote,
+       source_recruitment:recruitments!club_members_source_recruitment_id_fkey(community_whatsapp_link),
+       club:clubs(id, name, slug, community_whatsapp_link, instagram_url, archived_at, category:categories(*))`,
     )
     .eq("profile_id", user.id)
     .order("joined_at", { ascending: false });
   if (error) throw error;
 
-  const memberships = (data ?? []) as MyMembership[];
-  if (memberships.length === 0) return memberships;
+  const rows = (data ?? []) as unknown as Array<{
+    club_id: string;
+    joined_at: string;
+    role: string | null;
+    role_label: string | null;
+    exclude_from_promote: boolean | null;
+    source_recruitment: { community_whatsapp_link: string | null } | null;
+    club: MyMembership["club"];
+  }>;
+  if (rows.length === 0) return [];
 
-  // Resolve drive-specific community link per club. For each membership look
-  // up the most recent accepted application (must be published to have
-  // materialized the membership in the first place) whose drive has a
-  // non-null community_whatsapp_link. That value overrides the club-level.
-  const clubIds = memberships.map((m) => m.club_id);
-  const { data: acceptedApps, error: appsErr } = await supabase
-    .from("applications")
-    .select(
-      "club_id, updated_at, recruitment:recruitments(community_whatsapp_link, results_published_at)",
-    )
+  // Second query: web-admin tiers for these clubs (if the viewer is also an
+  // admin on them). Cheap — one round-trip, scoped to `profile_id = auth.uid()`.
+  const clubIds = rows.map((r) => r.club_id);
+  const adminTierByClub = new Map<string, string>();
+  const { data: adminRows, error: adminErr } = await supabase
+    .from("club_admins")
+    .select("club_id, admin_role")
     .eq("profile_id", user.id)
-    .eq("status", "accepted")
-    .in("club_id", clubIds)
-    .order("updated_at", { ascending: false });
-  if (appsErr) {
-    console.error("getMyMemberships accepted-apps lookup failed:", appsErr);
-    // Non-fatal: fall through with club-level links only.
-    return memberships;
+    .in("club_id", clubIds);
+  if (adminErr) {
+    console.error("getMyMemberships admin_tier lookup failed:", adminErr);
+    // Non-fatal: fall through with admin_tier = null.
+  } else {
+    for (const r of (adminRows ?? []) as Array<{
+      club_id: string;
+      admin_role: string;
+    }>) {
+      adminTierByClub.set(r.club_id, r.admin_role);
+    }
   }
 
-  const driveLinkByClub = new Map<string, string>();
-  for (const raw of acceptedApps ?? []) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = raw as any;
-    if (driveLinkByClub.has(a.club_id)) continue; // keep newest
-    const link = a.recruitment?.community_whatsapp_link;
-    const published = a.recruitment?.results_published_at;
-    if (link && published) driveLinkByClub.set(a.club_id, link);
-  }
-
-  return memberships.map((m) => {
-    const driveLink = driveLinkByClub.get(m.club_id) ?? null;
-    if (!driveLink || !m.club) return m;
+  return rows.map((r): MyMembership => {
+    const driveLink = r.source_recruitment?.community_whatsapp_link ?? null;
+    const clubLink = r.club?.community_whatsapp_link ?? null;
+    const resolvedCommunityLink = driveLink ?? clubLink;
     return {
-      ...m,
-      club: { ...m.club, community_whatsapp_link: driveLink },
+      club_id: r.club_id,
+      joined_at: r.joined_at,
+      role: r.role ?? "volunteer",
+      role_label: r.role_label,
+      exclude_from_promote: r.exclude_from_promote ?? false,
+      admin_tier: adminTierByClub.get(r.club_id) ?? null,
+      club: r.club
+        ? { ...r.club, community_whatsapp_link: resolvedCommunityLink }
+        : null,
     };
   });
 }
