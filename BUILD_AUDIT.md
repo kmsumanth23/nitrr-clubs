@@ -1843,5 +1843,69 @@ The migration hasn't been executed here — it can't be from this environment. A
 
 Once applied, edit any drive through the current UI to confirm `role_on_accept` no longer resets to `'volunteer'` on save.
 
+---
 
+# 17B Batch 2 — UI layer for role tags (Shipped)
 
+Scope: the six UI surfaces that consume Batch 1's server layer — drive editor role fields, member row role display + edit modal, cycle-end bulk-promote modal, grouped members page, and the My Clubs web-admin overlay. Pure UI + one query-shape consumption change (flat → grouped). No SQL, no new server actions (all three member RPCs already wired in Batch 1). Typecheck clean, no new lint.
+
+## Feature summary (as shipped)
+
+- **Drive editor** now has a "Role assigned on acceptance" block (role `<select>` over `ROLE_ENUM` + optional custom-label input) inside Section 1, below the community link. Non-blocking year advisory renders in clay when `roleYearAdvisory(role, targetYears)` returns a message.
+- **Member row** shows a structural role pill (`displayRoleLabel`) + a "Locked" pill when `exclude_from_promote`, plus an "Edit role" button (lead/sysadmin only) opening the edit modal.
+- **Member edit modal** — role select + custom label (→ `updateMemberRole`) and a separate include/exclude toggle (→ `toggleMemberExclude`), rendered as two sibling forms.
+- **Bulk-promote modal** — self-contained (own gated trigger + modal); lists members grouped by current role, auto-maps each to `ROLE_PROMOTION_NEXT[role]`, default-checks promotable non-excluded members, greys OCs (no next tier, never selectable), and shows a live "N members will be promoted" preview before `bulkPromoteMembers`.
+- **Members page** switched from flat `getMembersForClub` to `getMembersGroupedByRole`; renders a section per populated role (OC → HC → Core → Coord → Vol), skips empty roles, and hosts the Promote button in the header.
+- **My Clubs card** shows the role pill and, when `membership.admin_tier` is set, a "Web {tier}" overlay pill (`IconShieldCheck`, clay-soft).
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| patch | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | Imported `ROLE_ENUM`/`ROLE_DEFAULT_LABELS`/`roleYearAdvisory`/`Role`. Added `roleOnAccept` + `roleLabel` state (seeded from `drive?.role_on_accept`/`role_label`). Role block inserted in Section 1 (inside `#drive-form`, above "Who can apply?") — `<select name="roleOnAccept">` + `<input name="roleLabel">` + IIFE year advisory. Fields serialize into the existing form; no new form element. |
+| new | [components/admin/member-edit-modal.tsx](components/admin/member-edit-modal.tsx) | `MemberEditModal` body: `RoleForm` (role select + label → `updateMemberRole`) and `ExcludeForm` (include/exclude toggle → `toggleMemberExclude`) as **sibling** forms under one `<div>`. Both reload on `state.ok` (mirrors the `RemoveConfirm` pattern so the SSR page re-renders fresh props). Per-form submit buttons use `useFormStatus`. |
+| patch | [components/admin/member-row.tsx](components/admin/member-row.tsx) | Added role pill + "Locked" pill next to name. Added `canEditRole` gate (`lead \|\| super`) + "Edit role" button + a second `<Modal>` (sibling of the existing Remove modal inside the `<li>`) hosting `MemberEditModal`. Remove/edit buttons grouped in a flex container. |
+| new | [components/admin/bulk-promote-modal.tsx](components/admin/bulk-promote-modal.tsx) | Self-contained `BulkPromoteModal` (gated trigger + modal). `PromoteBody` holds a `Set<profileId>` selection (default = promotable + not excluded), derives `selections` (`{profileId, newRole}` via `ROLE_PROMOTION_NEXT`, OCs filtered out), renders grouped preview with `current → next` arrows, and submits via a footer-only `<form>` carrying `selections` as JSON. |
+| patch | [app/(admin)/admin/clubs/[slug]/members/page.tsx](app/(admin)/admin/clubs/[slug]/members/page.tsx) | Swapped `getMembersForClub` → `getMembersGroupedByRole`. Computed `memberCount` + `canPromote` (`lead \|\| super`). Header now has a flex group with `<BulkPromoteModal>` + the existing CSV export. Body renders a `<section>` per group with `ROLE_DEFAULT_LABELS[role]` heading + count; empty groups already omitted upstream. |
+| patch | [components/profile/my-clubs-list.tsx](components/profile/my-clubs-list.tsx) | Imported `IconShieldCheck` + `displayRoleLabel`/`Role`. Restructured the top row: club-name Link wrapped in a `min-w-0 flex-1` div with a pills row beneath (role pill always; "Web {tier}" clay pill when `admin_tier`). Category pill made `flex-shrink-0`. |
+
+## Nested-form audit (Lesson 7 / 23) — clean, zero near-misses
+
+The prompt flagged this as the most likely bug. Verified structurally, not just by count:
+
+- **member-edit-modal**: two `<form>`s (`RoleForm`, `ExcludeForm`) in separate function components, rendered as siblings under one `<div>`. Never nested.
+- **bulk-promote-modal**: the checkbox list sits **outside** the single footer `<form>`; only the hidden payload inputs + submit are inside it.
+- **member-row**: `<li>` is not a form; the Remove modal and the new Edit modal are sibling `<Modal>`s inside the `<li>`, each rendering its own form. No ancestor form exists (the members page has no wrapper form).
+- **drive-editor-form**: the role block is plain `<select>`/`<input>` added inside the pre-existing `#drive-form` — no form element introduced. The other forms in the file (publish/danger/result-community) are unchanged siblings in their own components.
+
+`Modal` renders inline (not portaled), so the edit modal's forms are DOM descendants of `<li>` — safe precisely because nothing up the tree is a `<form>`.
+
+## Deviations from the spec (all minor)
+
+1. **Member row uses the real nested profile shape.** Spec's snippet read `member.full_name`/`member.roll_number`/`member.year`; the actual `ClubMemberView` nests those under `member.profile`. Adapted (role/label/exclude are top-level, as in Batch 1).
+2. **`getMembersGroupedByRole` returns an array, not a `Record`.** Spec's page snippet used `Object.entries(...)`; Batch 1 shipped `Array<{role, members}>` (already OC→Vol ordered). Mapped over the array directly.
+3. **`BulkPromoteModal` includes its own trigger button.** Keeps the server page a clean drop-in; gated on `canPromote` (returns null otherwise).
+4. **Exclude toggle is a second mini-form** in the edit modal (spec explicitly allowed "two separate mini-forms") — it's a distinct RPC from role update.
+5. **"Edit role" button gated to lead/sysadmin** in the UI, matching the `update_member_role` RPC gate (managers can view the members page but the RPC rejects them).
+
+## Verification
+
+- `./node_modules/.bin/tsc --noEmit` — clean (exit 0).
+- ESLint on all six files — 1 warning, **pre-existing and intentional** (the `wasPendingRef` deps-less effect in drive-editor-form, untouched by this batch). No new warnings.
+- Tabler icon existence check: `IconArrowUp`, `IconArrowBigUpLines`, `IconShieldCheck`, `IconAlertTriangle` all resolve in `@tabler/icons-react`.
+- Color tokens confirmed in `tailwind.config.ts`: `indigo.soft`/`indigo.fg`, `clay.soft`/`clay.fg`, `sport` — so `bg-indigo-soft`, `bg-clay-soft` etc. are valid.
+- Batch-1 wiring re-confirmed: `drive.ts` reads `roleOnAccept`/`roleLabel` from FormData; `validation/drive.ts` has both schema fields; `audit/format.tsx` + `categorize.ts` carry all three member actions.
+
+## Not verified here (needs a running app + seeded data)
+
+- Visual/interaction smoke tests (drive editor role section, grouped members display, dual-pill My Clubs card) — no browser/screenshots captured from this environment.
+- End-to-end publish → `club_members.role = 'coordinator'` (server path; already proven in Batch 1 Addendum 1).
+
+## What Batch 2 does NOT touch
+
+- Public club team display (step 21), `club_admins.admin_role` structure, `club_team` table, `remove_member`, `applications` schema — all untouched.
+- No 17A files needed changes: Batch 1 already replaced the `getMyMemberships` two-query community-link resolver with the direct `source_recruitment_id` join.
+
+With Batch 2 landed, 17B (role tags) is UI-complete end-to-end. Remaining: user smoke test of the six surfaces, then the departments-per-drive step stays queued separately (per the 17B Batch 1 note).
+
+Let me know when goal is achived.

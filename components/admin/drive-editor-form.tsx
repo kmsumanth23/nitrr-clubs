@@ -23,6 +23,12 @@ import { QuestionBuilder } from "@/components/admin/question-builder";
 import { Modal } from "@/components/ui/modal";
 import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import { phaseLabel, PHASE_BADGE, type Phase } from "@/lib/phase";
+import {
+  ROLE_ENUM,
+  ROLE_DEFAULT_LABELS,
+  roleYearAdvisory,
+  type Role,
+} from "@/lib/roles";
 import type { DriveWithQuestions } from "@/lib/queries/admin-drives";
 
 /**
@@ -87,6 +93,14 @@ export function DriveEditorForm({
   // RPC (see ResultPhaseCommunityLinkForm below).
   const [communityLink, setCommunityLink] = React.useState<string>(
     drive?.community_whatsapp_link ?? "",
+  );
+  // 17B: structural role assigned to accepted applicants + optional custom
+  // display label. Snapshotted to `club_members` on publish.
+  const [roleOnAccept, setRoleOnAccept] = React.useState<Role>(
+    (drive?.role_on_accept as Role) ?? "volunteer",
+  );
+  const [roleLabel, setRoleLabel] = React.useState<string>(
+    drive?.role_label ?? "",
   );
 
   const [dirty, setDirty] = React.useState(false);
@@ -290,6 +304,68 @@ export function DriveEditorForm({
                 </p>
               </div>
             )}
+
+            {/* 17B: role assigned on acceptance + optional custom label. */}
+            <div className="rounded-2xl border border-line bg-cream/40 p-4">
+              <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                Role assigned on acceptance
+              </h4>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-ink">
+                    Role
+                  </label>
+                  <select
+                    name="roleOnAccept"
+                    value={roleOnAccept}
+                    onChange={(e) => setRoleOnAccept(e.target.value as Role)}
+                    disabled={readOnly}
+                    className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:bg-cream/40"
+                  >
+                    {ROLE_ENUM.map((r) => (
+                      <option key={r} value={r}>
+                        {ROLE_DEFAULT_LABELS[r]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-ink">
+                    Custom label{" "}
+                    <span className="text-[11px] font-normal text-ink-soft">
+                      (optional)
+                    </span>
+                  </label>
+                  <input
+                    name="roleLabel"
+                    type="text"
+                    value={roleLabel}
+                    onChange={(e) => setRoleLabel(e.target.value)}
+                    disabled={readOnly}
+                    placeholder={`e.g. "Team Captain" (defaults to "${ROLE_DEFAULT_LABELS[roleOnAccept]}")`}
+                    maxLength={100}
+                    className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:bg-cream/40"
+                  />
+                </div>
+              </div>
+
+              {/* Year advisory — soft, non-blocking. */}
+              {(() => {
+                const advisory = roleYearAdvisory(roleOnAccept, targetYears);
+                return advisory ? (
+                  <p className="mt-2 inline-flex items-start gap-1 text-[11px] text-clay">
+                    <IconAlertTriangle size={11} className="mt-0.5" /> {advisory}
+                  </p>
+                ) : null;
+              })()}
+
+              <p className="mt-2 text-[11px] text-ink-soft">
+                All students accepted through this drive get this role. The
+                custom label overrides the default display name.
+              </p>
+            </div>
 
             <div>
               <label className="mb-2 block text-sm font-medium text-ink">

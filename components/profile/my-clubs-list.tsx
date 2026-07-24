@@ -3,8 +3,10 @@ import {
   IconHome,
   IconCalendarEvent,
   IconBrandInstagram,
+  IconShieldCheck,
 } from "@tabler/icons-react";
 import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
+import { displayRoleLabel, type Role } from "@/lib/roles";
 import type { MyMembership } from "@/lib/queries/profile";
 
 /**
@@ -57,16 +59,31 @@ function MembershipCard({ membership }: { membership: MyMembership }) {
 
   return (
     <div className="flex flex-col rounded-2xl border border-line bg-white p-4">
-      {/* Top row: club name + category */}
+      {/* Top row: club name + role/web-admin pills + category */}
       <div className="mb-3 flex items-start justify-between gap-2">
-        <Link
-          href={`/clubs/${club.slug}`}
-          className="min-w-0 flex-1 truncate font-display text-lg font-bold text-ink hover:text-indigo"
-        >
-          {club.name}
-        </Link>
+        <div className="min-w-0 flex-1">
+          <Link
+            href={`/clubs/${club.slug}`}
+            className="block truncate font-display text-lg font-bold text-ink hover:text-indigo"
+          >
+            {club.name}
+          </Link>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-indigo-soft px-2 py-0.5 text-[10px] font-medium text-indigo">
+              {displayRoleLabel(membership.role as Role, membership.role_label)}
+            </span>
+            {membership.admin_tier && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-clay-soft px-2 py-0.5 text-[10px] font-medium text-clay"
+                title={`You're a ${membership.admin_tier} on this club's web-admin team`}
+              >
+                <IconShieldCheck size={9} /> Web {membership.admin_tier}
+              </span>
+            )}
+          </div>
+        </div>
         {club.category?.name && (
-          <span className="rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
+          <span className="flex-shrink-0 rounded-full bg-beige px-1.5 py-0.5 text-[10px] capitalize text-ink-soft">
             {club.category.name}
           </span>
         )}

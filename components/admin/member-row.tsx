@@ -4,7 +4,9 @@ import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { Modal } from "@/components/ui/modal";
+import { MemberEditModal } from "@/components/admin/member-edit-modal";
 import { removeMember, type MemberResult } from "@/lib/actions/member";
+import { displayRoleLabel } from "@/lib/roles";
 import type { ClubMemberView } from "@/lib/queries/admin-members";
 import type { AdminTier } from "@/lib/database.types";
 
@@ -27,10 +29,15 @@ export function MemberRow({
   viewerIsSuper: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [editOpen, setEditOpen] = React.useState(false);
 
   const canRemoveSomeone = viewerTier === "lead" || viewerIsSuper;
   const targetProtected = member.is_lead && !viewerIsSuper;
   const canRemoveThisOne = canRemoveSomeone && !targetProtected;
+
+  // 17B: role edits (and exclude toggle) are lead/sysadmin-only, matching the
+  // `update_member_role` RPC gate.
+  const canEditRole = viewerTier === "lead" || viewerIsSuper;
 
   const reason = !canRemoveSomeone
     ? "Only leads can remove members."
@@ -51,6 +58,20 @@ export function MemberRow({
             </span>
           )}
         </div>
+        {/* 17B: structural role pill + optional "Locked" (excluded) indicator */}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <span className="rounded-full bg-indigo-soft px-2 py-0.5 text-[10px] font-medium text-indigo">
+            {displayRoleLabel(member.role, member.role_label)}
+          </span>
+          {member.exclude_from_promote && (
+            <span
+              className="rounded-full bg-cream px-2 py-0.5 text-[10px] text-ink-soft"
+              title="Excluded from bulk promotion"
+            >
+              Locked
+            </span>
+          )}
+        </div>
         <div className="mt-0.5 text-xs text-ink-soft">
           {member.profile?.roll_number ?? "—"}
           {member.profile?.year && <> · Year {member.profile.year}</>}
@@ -61,15 +82,27 @@ export function MemberRow({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        disabled={!canRemoveThisOne}
-        title={reason || "Remove from club"}
-        className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-clay hover:text-clay disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Remove
-      </button>
+      <div className="flex flex-shrink-0 items-center gap-2">
+        {canEditRole && (
+          <button
+            type="button"
+            onClick={() => setEditOpen(true)}
+            title="Edit role"
+            className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-ink/40"
+          >
+            Edit role
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          disabled={!canRemoveThisOne}
+          title={reason || "Remove from club"}
+          className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-clay hover:text-clay disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Remove
+        </button>
+      </div>
 
       <Modal open={open} onClose={() => setOpen(false)}>
         <RemoveConfirm
@@ -77,6 +110,16 @@ export function MemberRow({
           clubId={clubId}
           clubSlug={clubSlug}
           onCancel={() => setOpen(false)}
+        />
+      </Modal>
+
+      {/* 17B: role edit modal — top-level sibling, not nested in any form. */}
+      <Modal open={editOpen} onClose={() => setEditOpen(false)}>
+        <MemberEditModal
+          member={member}
+          clubId={clubId}
+          clubSlug={clubSlug}
+          onClose={() => setEditOpen(false)}
         />
       </Modal>
     </li>

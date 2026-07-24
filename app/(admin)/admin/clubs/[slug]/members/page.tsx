@@ -2,10 +2,12 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { getEditableClub } from "@/lib/queries/admin";
-import { getMembersForClub } from "@/lib/queries/admin-members";
+import { getMembersGroupedByRole } from "@/lib/queries/admin-members";
 import { MemberRow } from "@/components/admin/member-row";
+import { BulkPromoteModal } from "@/components/admin/bulk-promote-modal";
 import { ExportCsvButton } from "@/components/admin/export-csv-button";
 import { isSysadmin } from "@/lib/queries/sysadmin";
+import { ROLE_DEFAULT_LABELS } from "@/lib/roles";
 
 export const metadata = { title: "Members — Admin" };
 
@@ -25,7 +27,9 @@ export default async function AdminMembersPage({
   // Members hidden from editor
   if (tier === "editor") redirect(`/admin/clubs/${slug}`);
 
-  const members = await getMembersForClub(club.id);
+  const groups = await getMembersGroupedByRole(club.id);
+  const memberCount = groups.reduce((n, g) => n + g.members.length, 0);
+  const canPromote = tier === "lead" || isSuper;
 
   return (
     <section>
@@ -46,30 +50,47 @@ export default async function AdminMembersPage({
             results are published.
           </p>
         </div>
-        <ExportCsvButton
-          href={`/admin/api/export/club-roster?slug=${slug}`}
-          label="Export CSV"
-        />
+        <div className="flex items-center gap-2">
+          <BulkPromoteModal
+            groups={groups}
+            clubId={club.id}
+            clubSlug={slug}
+            canPromote={canPromote}
+          />
+          <ExportCsvButton
+            href={`/admin/api/export/club-roster?slug=${slug}`}
+            label="Export CSV"
+          />
+        </div>
       </div>
 
-      {members.length === 0 ? (
+      {memberCount === 0 ? (
         <p className="rounded-2xl border border-line bg-white p-6 text-sm text-ink-soft">
           No members yet. Members appear here once a recruitment is published
           with accepted applications.
         </p>
       ) : (
-        <ul className="space-y-2">
-          {members.map((m) => (
-            <MemberRow
-              key={m.profile_id}
-              member={m}
-              clubId={club.id}
-              clubSlug={slug}
-              viewerTier={tier}
-              viewerIsSuper={isSuper}
-            />
+        <div className="space-y-6">
+          {groups.map((g) => (
+            <section key={g.role}>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                {ROLE_DEFAULT_LABELS[g.role]} ({g.members.length})
+              </h3>
+              <ul className="space-y-2">
+                {g.members.map((m) => (
+                  <MemberRow
+                    key={m.profile_id}
+                    member={m}
+                    clubId={club.id}
+                    clubSlug={slug}
+                    viewerTier={tier}
+                    viewerIsSuper={isSuper}
+                  />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
     </section>
   );
