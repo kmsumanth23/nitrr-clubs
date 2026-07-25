@@ -307,14 +307,20 @@ export function DriveEditorForm({
 
             {/* 17B: role assigned on acceptance + optional custom label. */}
             <div className="rounded-2xl border border-line bg-cream/40 p-4">
-              <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
-                Role assigned on acceptance
-              </h4>
+              <div className="mb-3">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-soft">
+                  Role assigned on acceptance
+                </h4>
+                <p className="mt-1 text-[11px] text-ink-soft">
+                  Role determines hierarchy for bulk promotion. Custom label
+                  overrides the display name shown to members.
+                </p>
+              </div>
 
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1.5 block text-sm font-medium text-ink">
-                    Role
+                    Structural role
                   </label>
                   <select
                     name="roleOnAccept"
@@ -344,11 +350,23 @@ export function DriveEditorForm({
                     value={roleLabel}
                     onChange={(e) => setRoleLabel(e.target.value)}
                     disabled={readOnly}
-                    placeholder={`e.g. "Team Captain" (defaults to "${ROLE_DEFAULT_LABELS[roleOnAccept]}")`}
+                    placeholder={`e.g., "Team Captain"`}
                     maxLength={100}
                     className="w-full rounded-xl border border-line bg-white p-2.5 text-sm text-ink outline-none focus:border-indigo disabled:bg-cream/40"
                   />
                 </div>
+              </div>
+
+              {/* Live preview of the final display label */}
+              <div className="mt-3 rounded-xl bg-indigo-soft/40 px-3 py-2">
+                <p className="text-[11px] text-ink-soft">
+                  Members will see:{" "}
+                  <span className="font-semibold text-indigo">
+                    {roleLabel.trim().length > 0
+                      ? roleLabel
+                      : ROLE_DEFAULT_LABELS[roleOnAccept]}
+                  </span>
+                </p>
               </div>
 
               {/* Year advisory — soft, non-blocking. */}
@@ -360,11 +378,6 @@ export function DriveEditorForm({
                   </p>
                 ) : null;
               })()}
-
-              <p className="mt-2 text-[11px] text-ink-soft">
-                All students accepted through this drive get this role. The
-                custom label overrides the default display name.
-              </p>
             </div>
 
             <div>

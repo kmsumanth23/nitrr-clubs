@@ -1908,4 +1908,58 @@ The prompt flagged this as the most likely bug. Verified structurally, not just 
 
 With Batch 2 landed, 17B (role tags) is UI-complete end-to-end. Remaining: user smoke test of the six surfaces, then the departments-per-drive step stays queued separately (per the 17B Batch 1 note).
 
+---
+
+# 17B Addendum — Drive-editor clarity + members search + sysadmin pill (Shipped)
+
+Small polish batch on top of Batch 2. No schema, no new server actions, no query changes — three UI touch-ups that clean up ambiguity users flagged during Batch 2 smoke testing plus one new visual marker.
+
+Spec source: [files (9)/](files%20\(9\)/) (`SETUP_STEP17B_ADDENDUM.md` + 3 patch specs).
+
+## Feature summary (as shipped)
+
+- **Drive editor role block clarity.** The role/label pair used to read as two peer inputs with no framing. Now: header carries a one-line explainer ("Role determines hierarchy for bulk promotion. Custom label overrides the display name…"), the select is relabelled **Structural role**, the input's placeholder is trimmed to `e.g., "Team Captain"`, and a live-preview pill in `bg-indigo-soft/40` renders `Members will see: {resolved label}` — updates on every keystroke, falls back to the enum's default label when the custom field is empty. The redundant footer paragraph is gone (its message is now in the header). Year advisory unchanged.
+- **Members page search bar.** New client component wraps the grouped list with an in-memory filter. Input at the top of the page (above the sections); matches `full_name` OR `roll_number` case-insensitively; empty groups collapse dynamically as the filter narrows; empty-query state shows all groups; empty-result state shows a friendly card. Match counter renders below the input while a query is active.
+- **Sysadmin navbar pill.** Dark-ink `bg-ink` pill with `IconShieldCheck` + "Super admin" label, rendered next to the `NITRR.` wordmark inside the left navbar pill. Visible only when `useUser().role === 'super_admin'`. Hidden below the `sm` breakpoint (space). Title tooltip: "You have platform-wide admin authority".
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| patch | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | Rewrote the "Role assigned on acceptance" block (~60 lines around line 308): header now has explainer paragraph; `<label>` changed from "Role" to "Structural role"; placeholder simplified; new live-preview `<div className="rounded-xl bg-indigo-soft/40 …">` below the grid renders `roleLabel.trim().length > 0 ? roleLabel : ROLE_DEFAULT_LABELS[roleOnAccept]`; footer paragraph removed. |
+| new | [components/admin/members-list-with-search.tsx](components/admin/members-list-with-search.tsx) | `"use client"` `MembersListWithSearch` — filters over `groupedMembers` in a `useMemo`, filters both `full_name` and `roll_number` case-insensitively, drops empty groups post-filter, renders match count + empty state + grouped `<section>`s. Passes through `viewerTier` + `viewerIsSuper` to `MemberRow` (see deviation 1). |
+| patch | [app/(admin)/admin/clubs/[slug]/members/page.tsx](app/(admin)/admin/clubs/[slug]/members/page.tsx) | Replaced the inline grouped rendering with `<MembersListWithSearch>`. Dropped the now-unused `MemberRow` + `ROLE_DEFAULT_LABELS` imports. Server-side data fetching + `BulkPromoteModal`/`ExportCsvButton` header unchanged. |
+| patch | [components/layout/navbar.tsx](components/layout/navbar.tsx) | Imported `IconShieldCheck`. Inserted `{role === "super_admin" && <SuperAdminPill />}` between the `NITRR.` `<Link>` and the hamburger `<button>` inside the left pill. Added `SuperAdminPill()` helper component at the bottom of the file — `hidden … sm:inline-flex` so it collapses on mobile. |
+
+## Deviations from the spec (worth flagging)
+
+1. **`MemberRow` prop contract.** The patch spec's snippet declared `canEditRole` + `canRemove` on `MembersListWithSearch` and passed them into `MemberRow`. The real `MemberRow` takes `viewerTier: AdminTier` + `viewerIsSuper: boolean` and derives edit/remove capability internally. I preserved the real contract — pass-through of `viewerTier`/`viewerIsSuper`. Nothing lost: the capability logic (`viewerTier === "lead" || viewerIsSuper`) already lives in `MemberRow`, and duplicating it in a wrapper would just be a naming layer with no behavioral change.
+2. **Scoping "bug" that wasn't.** The spec framed one of the changes as fixing a global-scoped search leak on the members page. Grep across `app/(admin)/admin/clubs/` and `components/admin/` confirmed: no such search exists. `ProfileSearch` (the only component that queries `profiles` globally) lives only in `add-admin-modal`, `promote-super-admin-modal`, and `create-club-form` — none of which render on `/admin/clubs/[slug]/members`. The new search is purely additive over the already-scoped `getMembersGroupedByRole(clubId)` result.
+3. **Navbar architecture — no new fetch needed.** The spec offered three options for fetching the current user's role (server-component navbar with fresh `getUser`, `useUser` extension, `React.useEffect` lookup). The existing `useUser` hook already exposes `role`, so option 2 collapsed to a one-line consumer — no state, no effect, no extra query per page load.
+4. **Live-preview pill uses `bg-indigo-soft/40`.** Matches the spec verbatim after confirming `indigo.soft = #E5E2FB` exists in [tailwind.config.ts](tailwind.config.ts).
+
+## Verification
+
+- `npx tsc --noEmit` — exit 0.
+- IDE diagnostics on the members page briefly reported stale errors for `ROLE_DEFAULT_LABELS`/`MemberRow` after the first edit; re-read of the file confirmed the second edit had landed and the errors were snapshot artifacts. `tsc` on the persisted file passes.
+- No lint changes (touched blocks contain no rules-violating patterns; the pre-existing `wasPendingRef` warning from Batch 2 is unaffected).
+- Grep sweep for other "Search" inputs on the admin members surface — none, per deviation 2.
+- Navbar wiring: reused `useUser().role`, no new hook, no new query, no new re-render trigger.
+
+## Not verified here (needs a running app)
+
+- Interactive smoke tests (visual regression on the role block, live-filter latency, sysadmin pill breakpoint behavior) — no browser session captured from this environment.
+- Cross-account check (Recruit sees no pill, Gladiator sees pill on desktop, pill hidden below `sm`) — belongs to the user smoke pass.
+
+## What this addendum does NOT touch
+
+- No 17B server layer (Batch 1) files — no SQL, no query changes, no action changes.
+- No 17B Batch 2 UI beyond the three surfaces above.
+- Sysadmin global search bar, "Platform owner" subtitle, and any 17C prep — deferred as declared in the spec.
+- `displayRoleLabel` — no logic change; the drive-editor fix is UI framing only.
+
+## After this addendum
+
+17B is closed pending user smoke on the three touched surfaces. Next: 17C planning (departments per drive + ranked preferences + placement UI) as sequenced in [CLAUDE.md](CLAUDE.md).
+
 Let me know when goal is achived.

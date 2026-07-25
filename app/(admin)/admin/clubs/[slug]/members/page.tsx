@@ -3,11 +3,10 @@ import Link from "next/link";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { getEditableClub } from "@/lib/queries/admin";
 import { getMembersGroupedByRole } from "@/lib/queries/admin-members";
-import { MemberRow } from "@/components/admin/member-row";
+import { MembersListWithSearch } from "@/components/admin/members-list-with-search";
 import { BulkPromoteModal } from "@/components/admin/bulk-promote-modal";
 import { ExportCsvButton } from "@/components/admin/export-csv-button";
 import { isSysadmin } from "@/lib/queries/sysadmin";
-import { ROLE_DEFAULT_LABELS } from "@/lib/roles";
 
 export const metadata = { title: "Members — Admin" };
 
@@ -70,27 +69,13 @@ export default async function AdminMembersPage({
           with accepted applications.
         </p>
       ) : (
-        <div className="space-y-6">
-          {groups.map((g) => (
-            <section key={g.role}>
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-soft">
-                {ROLE_DEFAULT_LABELS[g.role]} ({g.members.length})
-              </h3>
-              <ul className="space-y-2">
-                {g.members.map((m) => (
-                  <MemberRow
-                    key={m.profile_id}
-                    member={m}
-                    clubId={club.id}
-                    clubSlug={slug}
-                    viewerTier={tier}
-                    viewerIsSuper={isSuper}
-                  />
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+        <MembersListWithSearch
+          groupedMembers={groups}
+          clubId={club.id}
+          clubSlug={slug}
+          viewerTier={tier}
+          viewerIsSuper={isSuper}
+        />
       )}
     </section>
   );

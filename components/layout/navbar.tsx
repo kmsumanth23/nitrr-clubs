@@ -3,7 +3,12 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { IconUser, IconLayoutDashboard, IconLogout } from "@tabler/icons-react";
+import {
+  IconUser,
+  IconLayoutDashboard,
+  IconLogout,
+  IconShieldCheck,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
@@ -109,6 +114,7 @@ export function Navbar() {
               >
                 NITRR<span className="text-indigo">.</span>
               </Link>
+              {role === "super_admin" && <SuperAdminPill />}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -211,5 +217,19 @@ export function Navbar() {
         <AuthFromParams user={user} />
       </React.Suspense>
     </>
+  );
+}
+
+/** Visible only to the sysadmin themselves (never to other viewers). Sits
+ *  next to the NITRR wordmark. Hidden on the smallest breakpoint (space). */
+function SuperAdminPill() {
+  return (
+    <div
+      className="hidden items-center gap-1.5 rounded-full bg-ink px-2.5 py-1 text-[11px] font-medium text-white sm:inline-flex"
+      title="You have platform-wide admin authority"
+    >
+      <IconShieldCheck size={12} />
+      Super admin
+    </div>
   );
 }
