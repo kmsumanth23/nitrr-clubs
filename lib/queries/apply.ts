@@ -127,6 +127,14 @@ export async function getOpenDrivesForClub(
  *  Shape mirrors `getApplicationsForDrive` — nested `drive` block for the
  *  data-of-record, sibling flags (`eligible`, `existing_application`) for
  *  per-viewer state. */
+/** 17C: department shown on the apply form. Community link is intentionally
+ *  NOT exposed here — students shouldn't see it before acceptance. */
+export interface ApplyDepartment {
+  id: string;
+  name: string;
+  sort_order: number;
+}
+
 export interface DriveForApply {
   drive: {
     id: string;
@@ -140,14 +148,17 @@ export interface DriveForApply {
     community_whatsapp_link: string | null; // 17A
     role_on_accept: string; // 17B
     role_label: string | null; // 17B
+    max_department_choices: number; // 17C
     phase: Phase;
     questions: DriveQuestionForApply[];
+    departments: ApplyDepartment[]; // 17C
   };
   eligible: boolean;
   existing_application: {
     id: string;
     status: ApplicationStatus;
     responses: Record<string, string>;
+    preferred_departments: string[] | null; // 17C
   } | null;
 }
 
@@ -172,8 +183,10 @@ export async function getDriveForApply(
       `id, club_id, name, description, target_years, deadline, result_date,
        published_at, results_published_at, interview_whatsapp_link,
        community_whatsapp_link, role_on_accept, role_label,
+       max_department_choices,
        club:clubs(slug),
-       drive_questions(id, prompt, question_type, sort_order, required)`,
+       drive_questions(id, prompt, question_type, sort_order, required),
+       drive_departments(id, name, sort_order)`,
     )
     .eq("id", driveId)
     .not("published_at", "is", null)
@@ -205,7 +218,7 @@ export async function getDriveForApply(
 
   const { data: existingApp } = await supabase
     .from("applications")
-    .select("id, status, responses")
+    .select("id, status, responses, preferred_departments")
     .eq("recruitment_id", driveId)
     .eq("profile_id", studentId)
     .maybeSingle();
@@ -223,6 +236,7 @@ export async function getDriveForApply(
       community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
       role_on_accept: r.role_on_accept ?? "volunteer", // 17B
       role_label: r.role_label ?? null, // 17B
+      max_department_choices: r.max_department_choices ?? 2, // 17C
       phase,
       questions: (r.drive_questions ?? []).map(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -234,6 +248,10 @@ export async function getDriveForApply(
           required: q.required,
         }),
       ),
+      // 17C: departments sorted by sort_order for ranked-preference picker
+      departments: ((r.drive_departments ?? []) as ApplyDepartment[])
+        .slice()
+        .sort((a, b) => a.sort_order - b.sort_order),
     },
     eligible,
     existing_application: existingApp
@@ -241,6 +259,8 @@ export async function getDriveForApply(
           id: existingApp.id,
           status: existingApp.status as ApplicationStatus,
           responses: (existingApp.responses ?? {}) as Record<string, string>,
+          preferred_departments:
+            (existingApp.preferred_departments as string[] | null) ?? null,
         }
       : null,
   };

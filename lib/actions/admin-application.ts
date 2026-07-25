@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getPhase } from "@/lib/phase";
 import { sendApplicationResultEmails } from "@/lib/email/send-application-results";
+import { setAcceptedDepartmentSchema } from "@/lib/validation/drive";
 import type { ApplicationStatus } from "@/lib/database.types";
 
 export type ReviewResult = { error?: string; ok?: boolean };
@@ -90,6 +91,50 @@ export async function setApplicationStatus(
     .eq("id", applicationId);
   if (updErr) return { error: updErr.message };
 
+  // 17C: on transition to `accepted`, default placement to the applicant's
+  // 1st preference when the drive has departments and no placement is set
+  // yet. Non-fatal — if this fails, the admin can still assign manually via
+  // `setAcceptedDepartment` before publish.
+  if (next === "accepted") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: appData } = await supabase
+      .from("applications")
+      .select(
+        "recruitment_id, preferred_departments, accepted_department_id",
+      )
+      .eq("id", applicationId)
+      .maybeSingle();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const appRow = appData as any;
+
+    if (appRow) {
+      const currentPlacement = appRow.accepted_department_id as string | null;
+      const prefs = (appRow.preferred_departments as string[] | null) ?? [];
+
+      if (!currentPlacement) {
+        const { data: deptRows } = await supabase
+          .from("drive_departments")
+          .select("id")
+          .eq("recruitment_id", appRow.recruitment_id as string)
+          .limit(1);
+        const driveHasDepartments = (deptRows ?? []).length > 0;
+
+        if (driveHasDepartments && prefs.length > 0) {
+          const { error: placeErr } = await supabase
+            .from("applications")
+            .update({ accepted_department_id: prefs[0] } as never)
+            .eq("id", applicationId);
+          if (placeErr) {
+            console.error(
+              "setApplicationStatus default-placement failed (non-fatal):",
+              placeErr,
+            );
+          }
+        }
+      }
+    }
+  }
+
   revalidatePath(`/admin/clubs/${clubSlug}/applications`);
   revalidatePath("/profile");
   return { ok: true };
@@ -175,5 +220,47 @@ export async function publishResults(
   revalidatePath(`/admin/clubs/${clubSlug}`);
   revalidatePath("/profile");
   revalidatePath("/");
+  return { ok: true };
+}
+
+/**
+ * 17C — Set (or clear) an application's accepted department placement.
+ *
+ * Allowed in all phases (RPC enforces auth + belongs-to-drive). Post-publish
+ * edits sync into `club_members.accepted_department_id` inside the same RPC
+ * transaction so the community-link resolver stays consistent.
+ *
+ * `departmentId` FormData value: UUID string, or empty string / absent
+ * → clears placement.
+ */
+export async function setAcceptedDepartment(
+  _prev: ReviewResult,
+  formData: FormData,
+): Promise<ReviewResult> {
+  const clubSlug = formData.get("__club_slug") as string;
+  const driveId = formData.get("driveId") as string;
+  const rawDeptId = formData.get("departmentId");
+
+  const parsed = setAcceptedDepartmentSchema.safeParse({
+    applicationId: formData.get("applicationId"),
+    departmentId:
+      typeof rawDeptId === "string" && rawDeptId.trim().length > 0
+        ? rawDeptId
+        : null,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_accepted_department", {
+    application_id_in: parsed.data.applicationId,
+    department_id_in: parsed.data.departmentId,
+  } as never);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/admin/clubs/${clubSlug}/applications`);
+  if (driveId) {
+    revalidatePath(`/admin/clubs/${clubSlug}/recruitment/${driveId}`);
+  }
+  revalidatePath("/profile");
   return { ok: true };
 }

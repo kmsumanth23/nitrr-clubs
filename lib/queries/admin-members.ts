@@ -27,6 +27,12 @@ export interface ClubMemberView {
   /** 17B: FK back to the drive that materialized this membership, or null for
    *  legacy pre-17B rows. `ON DELETE SET NULL` on the FK. */
   source_recruitment_id: string | null;
+  /** 17C: department the member was placed in (denorm on `club_members`).
+   *  Null when the source drive had no departments. */
+  accepted_department: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 /** Alias for the 17B goal-doc name. Both names refer to the same shape. */
@@ -42,7 +48,9 @@ export async function getMembersForClub(
     .from("club_members")
     .select(
       `profile_id, joined_at, role, role_label, exclude_from_promote, source_recruitment_id,
-       profile:profiles!club_members_profile_id_fkey(id, full_name, email, roll_number, year, branch)`,
+       accepted_department_id,
+       profile:profiles!club_members_profile_id_fkey(id, full_name, email, roll_number, year, branch),
+       accepted_department:drive_departments!club_members_accepted_department_id_fkey(id, name)`,
     )
     .eq("club_id", clubId)
     .order("joined_at", { ascending: false });
@@ -74,6 +82,12 @@ export async function getMembersForClub(
       role_label: raw.role_label ?? null,
       exclude_from_promote: raw.exclude_from_promote ?? false,
       source_recruitment_id: raw.source_recruitment_id ?? null,
+      accepted_department: raw.accepted_department
+        ? {
+            id: raw.accepted_department.id as string,
+            name: raw.accepted_department.name as string,
+          }
+        : null,
     };
   });
 }

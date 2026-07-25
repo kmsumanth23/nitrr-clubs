@@ -69,8 +69,8 @@ export function AddAdminModal({
             Add a club admin
           </h3>
           <p className="text-xs text-ink-soft">
-            Search for a profile, choose their tier, and confirm. They&apos;ll
-            be notified through the audit log.
+            Choose a current member of this club and assign their admin tier.
+            They&apos;ll be notified through the audit log.
           </p>
 
           <div>
@@ -78,6 +78,8 @@ export function AddAdminModal({
               Find someone
             </label>
             <ProfileSearch
+              mode="club_members"
+              clubId={clubId}
               excludeClubId={clubId}
               selected={selected}
               onSelect={setSelected}

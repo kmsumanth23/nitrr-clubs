@@ -72,6 +72,8 @@ export const createDriveSchema = z.object({
   communityWhatsappLink: optionalWhatsappLinkSchema.optional(), // 17A: optional
   roleOnAccept: z.enum(ROLE_ENUM).default("volunteer"), // 17B
   roleLabel: z.string().trim().max(100).optional().nullable(), // 17B
+  // 17C: how many departments the student can rank; RPC clamps to [1,6].
+  maxDepartmentChoices: z.coerce.number().int().min(1).max(6).default(2),
 });
 
 export type CreateDriveInput = z.infer<typeof createDriveSchema>;
@@ -94,6 +96,9 @@ export const updateDriveSchema = z.object({
   // have a prior value to preserve.
   roleOnAccept: z.enum(ROLE_ENUM).optional().nullable(), // 17B
   roleLabel: z.string().trim().max(100).optional().nullable(), // 17B
+  // 17C: same preserve semantics as roleOnAccept — null preserves the current
+  // column value on the RPC side. Batch 2 UI will send an explicit value.
+  maxDepartmentChoices: z.coerce.number().int().min(1).max(6).optional().nullable(),
 });
 
 /** 17A: post-publish carve-out — only community link is editable via the
@@ -157,3 +162,49 @@ export const swapQuestionOrderSchema = z.object({
   questionAId: z.string().uuid(),
   questionBId: z.string().uuid(),
 });
+
+/* ========================================================================
+ * 17C — Department schemas
+ * ==================================================================== */
+
+export const addDepartmentSchema = z.object({
+  driveId: z.string().uuid(),
+  name: z.string().trim().min(1, "Department name is required").max(100),
+  communityWhatsappLink: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .nullable(),
+});
+export type AddDepartmentInput = z.infer<typeof addDepartmentSchema>;
+
+export const updateDepartmentSchema = z.object({
+  departmentId: z.string().uuid(),
+  name: z.string().trim().min(1, "Department name is required").max(100),
+  communityWhatsappLink: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .nullable(),
+});
+export type UpdateDepartmentInput = z.infer<typeof updateDepartmentSchema>;
+
+export const deleteDepartmentSchema = z.object({
+  departmentId: z.string().uuid(),
+});
+
+export const swapDepartmentOrderSchema = z.object({
+  idA: z.string().uuid(),
+  idB: z.string().uuid(),
+});
+
+/** null departmentId clears the placement. */
+export const setAcceptedDepartmentSchema = z.object({
+  applicationId: z.string().uuid(),
+  departmentId: z.string().uuid().nullable(),
+});
+export type SetAcceptedDepartmentInput = z.infer<
+  typeof setAcceptedDepartmentSchema
+>;

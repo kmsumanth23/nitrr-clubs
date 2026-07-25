@@ -22,6 +22,20 @@ export interface AdminApplication extends Application {
   /** 16B-addendum: append-only note history, newest first. Populated only by
    *  `getApplicationsForDrive`; other queries leave it undefined. */
   notes?: ApplicationNote[];
+  /** 17C: applicant's ranked department preferences resolved to names, with
+   *  rank (0-indexed) in the preference list. Populated only by
+   *  `getApplicationsForDrive`. References to deleted departments are stripped. */
+  preferred_departments_resolved?: Array<{
+    id: string;
+    name: string;
+    rank: number;
+  }>;
+  /** 17C: admin's placement decision. Only populated post-accept. Null for
+   *  drives without departments. Populated only by `getApplicationsForDrive`. */
+  accepted_department?: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 export interface RecruitmentForAdmin {
@@ -255,13 +269,23 @@ export async function getApplicationsForDrive(
     .from("applications")
     .select(
       `*,
-       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch)`,
+       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch),
+       accepted_department:drive_departments!applications_accepted_department_id_fkey(id, name)`,
     )
     .eq("recruitment_id", driveId)
     .order("created_at", { ascending: false });
   if (appsErr) throw appsErr;
 
   const applications = (appsData ?? []) as AdminApplication[];
+
+  // 17C: fetch drive's departments once for resolving preference UUIDs to names
+  const { data: driveDepts } = await supabase
+    .from("drive_departments")
+    .select("id, name")
+    .eq("recruitment_id", driveId);
+  const deptById = new Map<string, string>(
+    (driveDepts ?? []).map((d: { id: string; name: string }) => [d.id, d.name]),
+  );
 
   // Fetch note history for all applications in one shot, then stitch onto rows.
   // Separate query rather than an embedded join so RLS on applications and
@@ -295,10 +319,30 @@ export async function getApplicationsForDrive(
     }
   }
 
-  const enriched: AdminApplication[] = applications.map((a) => ({
-    ...a,
-    notes: notesByAppId.get(a.id) ?? [],
-  }));
+  const enriched: AdminApplication[] = applications.map((a) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = a as any;
+    const prefs = (raw.preferred_departments ?? []) as string[];
+    const preferredResolved = prefs
+      .map((deptId: string, idx: number) => ({
+        id: deptId,
+        name: deptById.get(deptId) ?? "(Unknown)",
+        rank: idx,
+      }))
+      .filter((p) => p.name !== "(Unknown)"); // strip deleted-dept references
+    const accepted = raw.accepted_department
+      ? {
+          id: raw.accepted_department.id as string,
+          name: raw.accepted_department.name as string,
+        }
+      : null;
+    return {
+      ...a,
+      notes: notesByAppId.get(a.id) ?? [],
+      preferred_departments_resolved: preferredResolved,
+      accepted_department: accepted,
+    };
+  });
 
   const counts: Record<string, number> = {
     all: enriched.length,

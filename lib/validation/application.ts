@@ -67,3 +67,20 @@ export function normalizeResponsesInput(
   }
   return out;
 }
+
+/**
+ * 17C: ranked department preferences validator.
+ *
+ * Array of UUIDs, dedup-checked. Length limit + belongs-to-drive check
+ * happen in the action against `drive.max_department_choices` and the drive's
+ * `drive_departments` set — those constraints can't live at the schema layer
+ * because they depend on the drive being applied to.
+ */
+export const preferredDepartmentsSchema = z
+  .array(z.string().uuid())
+  .refine(
+    (arr) => new Set(arr).size === arr.length,
+    "You can't pick the same department twice.",
+  )
+  .optional()
+  .nullable();

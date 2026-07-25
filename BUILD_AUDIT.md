@@ -1962,4 +1962,84 @@ Spec source: [files (9)/](files%20\(9\)/) (`SETUP_STEP17B_ADDENDUM.md` + 3 patch
 
 17B is closed pending user smoke on the three touched surfaces. Next: 17C planning (departments per drive + ranked preferences + placement UI) as sequenced in [CLAUDE.md](CLAUDE.md).
 
+---
+
+# 17C Batch 1 — Server layer for departments + admin search scoping (Shipped)
+
+Scope: SQL migration + 14 TypeScript patches. Adds departments per drive (opt-in), ranked applicant preferences, admin placement decision (defaults to 1st preference on accept), and scopes the add-admin search to current members only. No UI wiring — Batch 2 handles that.
+
+Spec source: [files (10)/](files%20\(10\)/) (`SETUP_STEP17C_BATCH1.md` + `17c_departments.sql` + `17c_typescript_patches.md`).
+
+## Feature summary (as shipped)
+
+- **`drive_departments` table** — per-drive, ordered by `sort_order`, with `community_whatsapp_link` (nullable).
+- **`applications.preferred_departments` (uuid[])** — student's ranked prefs at submit; **`accepted_department_id`** — admin's placement decision (`on delete restrict`, protects placed students).
+- **`club_members.accepted_department_id`** — denormalized on publish so `getMyMemberships` can resolve the community link via a single embedded join.
+- **`recruitments.max_department_choices`** — 1-6, default 2, `check` constraint enforces.
+- **`create_drive` / `update_drive`** — signatures grow by one param (`max_department_choices_in`); `update_drive` inherits the 17B coalesce-preserve pattern (null preserves existing).
+- **`publish_recruitment_results`** — errors out if any `accepted` application has null `accepted_department_id` on a drive with departments; writes `accepted_department_id` into `club_members` in the same insert.
+- **5 new RPCs** — `add_drive_department` (draft-only), `update_drive_department` (all phases; name + link), `delete_drive_department` (draft-only; blocks if placements exist; renormalizes `preferred_departments` arrays), `swap_drive_department_order` (draft-only), `set_accepted_department` (all phases; syncs to `club_members` in same txn).
+- **Community-link resolver chain** in `getMyMemberships`: dept → drive → club (writes onto `club.community_whatsapp_link` so `MyClubsList` is unchanged).
+- **`AdminApplication`** now carries `preferred_departments_resolved` (rank + name; deleted-dept references stripped) and `accepted_department` — populated only by `getApplicationsForDrive`.
+- **`ClubMemberView` / `MembershipDetail`** now carries `accepted_department: { id, name } | null`.
+- **Admin search scoped to club members** — new `searchClubMembersForAdminAssignment(clubId, query)` in `lib/queries/profile-search.ts`; `ProfileSearch` gains `mode: "global" | "club_members"` (default `global` preserves existing callers); `add-admin-modal` now uses `mode="club_members"` — sysadmin promote + create-club flows continue using global search.
+- **Accept transition auto-defaults `accepted_department_id`** to `preferred_departments[0]` when the drive has departments and no placement is set yet (non-fatal — admin can override before publish).
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| new | [supabase/17c_departments.sql](supabase/17c_departments.sql) | Table + 5 col additions + 5 new RPCs + 3 rewritten RPCs (create_drive, update_drive, publish_recruitment_results). All grants co-located per Lesson 16. |
+| patch | [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | `DriveDepartment` type; `max_department_choices` + `department_count` on `DriveListItem`; `departments[]` on `DriveWithQuestions` (sorted client-side by `sort_order`). |
+| patch | [lib/queries/apply.ts](lib/queries/apply.ts) | `ApplyDepartment` type (link intentionally omitted pre-accept); `max_department_choices` + `departments[]` on drive; `preferred_departments` on `existing_application`. |
+| patch | [lib/queries/profile.ts](lib/queries/profile.ts) | `accepted_department` on `MyMembership`; 3-tier resolver dept → drive → club, written onto `club.community_whatsapp_link` so `MyClubsList` doesn't need to know about the chain. |
+| patch | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | Optional `preferred_departments_resolved` + `accepted_department` on `AdminApplication`; `getApplicationsForDrive` fetches `drive_departments` for name resolution; deleted-department references stripped from prefs. |
+| patch | [lib/queries/admin-members.ts](lib/queries/admin-members.ts) | `accepted_department: { id, name } \| null` on `ClubMemberView` (aliased `MembershipDetail`). Second-embed on `getMembersForClub` (which powers `getMembersGroupedByRole`). |
+| patch | [lib/validation/drive.ts](lib/validation/drive.ts) | `maxDepartmentChoices` on create (default 2) + update (null=preserve, 17B pattern). 5 new dept schemas — `addDepartmentSchema`, `updateDepartmentSchema`, `deleteDepartmentSchema`, `swapDepartmentOrderSchema`, `setAcceptedDepartmentSchema`. |
+| patch | [lib/validation/application.ts](lib/validation/application.ts) | `preferredDepartmentsSchema` — shape-only (array of UUIDs + no dupes); length + belongs-to-drive live in the action (they need the drive being applied to). |
+| patch | [lib/actions/drive.ts](lib/actions/drive.ts) | New `readMaxDepartmentChoicesOrNull` helper (17B pattern). `create_drive`/`update_drive` pass `max_department_choices_in`. 4 new dept CRUD actions (`addDriveDepartment`, `updateDriveDepartment`, `deleteDriveDepartment`, `swapDriveDepartmentOrder`) — all cast RPC args `as never` per project convention. |
+| patch | [lib/actions/application.ts](lib/actions/application.ts) | `readPreferredDepartments` helper — returns `{ value: null }` when drive has no depts, error when drive has depts but student sent empty. Length ≤ `max_department_choices` + no dupes + all belong to drive. Both `submitApplication` and `updateApplication` wired (re-validates on edit since drive depts can change during Open). |
+| patch | [lib/actions/admin-application.ts](lib/actions/admin-application.ts) | On accept transition: fetches app + drive, defaults `accepted_department_id` to `preferred_departments[0]` if drive has depts + placement is null. Non-fatal — admin can override via new `setAcceptedDepartment` action. |
+| patch | [lib/database.types.ts](lib/database.types.ts) | Manually mirrored the migration (`drive_departments` table + 3 col additions across `applications`/`club_members`/`recruitments` + 5 new RPC entries alphabetically + extended `create_drive`/`update_drive` signatures). User followed up with `supabase gen` post-migration — the regenerated file replaces these manual edits cleanly. |
+| patch | [lib/queries/profile-search.ts](lib/queries/profile-search.ts) | New `searchClubMembersForAdminAssignment(clubId, query)` — scopes candidate set to `club_members` of the given club, applies fuzzy name/email/roll filter, excludes existing admins, caps at 8. `searchProfiles` (global) preserved for `promote-super-admin-modal` + `create-club-form`. |
+| patch | [components/admin/profile-search.tsx](components/admin/profile-search.tsx) | New `mode?: "global" \| "club_members"` prop (default `"global"` — no behavior change for existing callers). `useEffect` branches on mode; placeholder differs. `mode + clubId` added to deps array. |
+| patch | [components/admin/add-admin-modal.tsx](components/admin/add-admin-modal.tsx) | Switched to `mode="club_members"` with `clubId={clubId}`. Explainer copy updated to "Choose a current member of this club". |
+
+## Deviations from the spec (worth flagging)
+
+1. **`ApplyDepartment` intentionally omits `community_whatsapp_link`** — students shouldn't see the department link pre-accept. Spec type had it, mine drops it. If a future UI legitimately needs it on apply, add a dedicated resolver, don't leak this shape.
+2. **`create_drive`'s RPC type `max_department_choices_in: number` (non-null)** — matches SQL `int not null`; the RPC clamps null internally to 2. `update_drive` is `number | null` because it needs the preserve semantics.
+3. **`AdminApplication.preferred_departments_resolved` + `accepted_department` are optional `?` fields** — populated only by `getApplicationsForDrive`. `getApplicationsForClub` / `getApplicationHistoryForClub` weren't reshaped (they don't need this data).
+4. **Embedded dept rows sorted client-side** in `admin-drives.ts` and `apply.ts` — Postgres doesn't sort embedded resources by default; the alternative would have been another `.order()` on the embedded relation but the mapper-side sort is simpler and identical.
+5. **`readMaxDepartmentChoicesOrNull` helper mirrors the 17B `readRoleOrNull` pattern** rather than the spec's inline `?? undefined`. Same effect; keeps preserve-on-absent machinery consistent.
+6. **`updateApplication` re-validates prefs on edit** — spec was ambiguous. Safer to re-check because the drive's departments can change during Open.
+7. **`ProfileSearch` default mode is `"global"`** — existing callers (`promote-super-admin-modal`, `create-club-form`) don't pass `mode` at all, so they retain the old behavior. Only `add-admin-modal` opts in.
+8. **`database.types.ts` will be regenerated by the user** post-migration via `supabase gen`. Manual edits were correct but temporary — the regeneration is authoritative.
+
+## Verification
+
+- `npx tsc --noEmit` — exit 0 (with manual `database.types.ts` edits in place).
+- Sanity greps per the spec: `searchClubMembersForAdminAssignment` used in exactly one place (`ProfileSearch` component); the 5 new dept RPCs are called only from the action layer.
+- Runtime PGRST200 errors after code shipped but before SQL applied — expected. All three surfaced errors were "no such table" / "no such FK", not shape mismatches. User applied the migration and all three test routes (`/admin/clubs/interact/recruitment`, `/profile`, `/`) returned 200 immediately.
+
+## Not verified here (needs interactive testing on live data)
+
+- End-to-end apply flow with a drive that has departments (student submits ranked prefs → admin accepts → default placement fires → publish materializes `club_members.accepted_department_id` → community-link resolver picks up dept link) — no UI to test through yet.
+- `set_accepted_department` sync into `club_members` on post-publish edits — no admin UI to trigger it yet.
+- `delete_drive_department` renormalization of `preferred_departments` arrays — draft-only + blocked when placements exist; needs Batch 2 UI to exercise.
+- `publish_recruitment_results` error on unplaced accepted apps — needs Batch 2 UI to reach.
+
+Batch 2 UI is the natural test surface for all four.
+
+## What Batch 1 does NOT touch
+
+- No UI — Batch 2 handles drive editor departments section, apply-form ranked picker, admin review dept preferences display + placement dropdown, admin members dept pill, MyClubsList dept pill.
+- No caution banner in drive editor (Batch 2).
+- `publish_drive` (opening a drive) — unchanged; departments can only be added in draft phase, so no phase-transition gate needed at publish.
+- Any 17A / 17B server layer — untouched (drive-scoped community link resolver simply gets prepended with the dept tier).
+
+## After Batch 1
+
+Say "17C Batch 1 clean" once smoke-tested through the 5 routes listed above. Batch 2 (UI) is next.
+
 Let me know when goal is achived.

@@ -63,3 +63,64 @@ export async function searchProfiles(
 
   return results;
 }
+
+/**
+ * 17C — Search CURRENT MEMBERS of a specific club for admin assignment.
+ *
+ * Q7 scope fix: admin tiers should only be granted to people already on the
+ * club's roster. This narrows the picker's candidate set from all profiles
+ * to `club_members` of the specified club, then applies the same fuzzy
+ * name/email/roll filter and excludes existing admins.
+ *
+ * `searchProfiles` remains available for global-search callers
+ * (`promote-super-admin-modal`, `create-club-form`).
+ */
+export async function searchClubMembersForAdminAssignment(
+  clubId: string,
+  query: string,
+): Promise<ProfileSearchResult[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const supabase = await createClient();
+
+  const { data: memberRows, error } = await supabase
+    .from("club_members")
+    .select(
+      "profile_id, profile:profiles!club_members_profile_id_fkey(id, full_name, email, roll_number, year, branch)",
+    )
+    .eq("club_id", clubId);
+
+  if (error) return [];
+
+  const members = (
+    (memberRows ?? []) as unknown as Array<{
+      profile: ProfileSearchResult | null;
+    }>
+  )
+    .map((m) => m.profile)
+    .filter((p): p is ProfileSearchResult => p !== null);
+
+  const qLower = q.toLowerCase();
+  const matchingMembers = members.filter((p) => {
+    const name = (p.full_name ?? "").toLowerCase();
+    const email = (p.email ?? "").toLowerCase();
+    const roll = (p.roll_number ?? "").toLowerCase();
+    return (
+      name.includes(qLower) || email.includes(qLower) || roll.includes(qLower)
+    );
+  });
+
+  if (matchingMembers.length === 0) return [];
+
+  const { data: existing } = await supabase
+    .from("club_admins")
+    .select("profile_id")
+    .eq("club_id", clubId)
+    .in("profile_id", matchingMembers.map((m) => m.id));
+  const existingSet = new Set(
+    (existing ?? []).map((r) => r.profile_id as string),
+  );
+
+  return matchingMembers.filter((m) => !existingSet.has(m.id)).slice(0, 8);
+}

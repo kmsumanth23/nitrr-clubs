@@ -1,6 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { getPhase, type Phase } from "@/lib/phase";
 
+/** 17C: department attached to a drive. Ordered by sort_order. */
+export interface DriveDepartment {
+  id: string;
+  name: string;
+  community_whatsapp_link: string | null;
+  sort_order: number;
+}
+
 /** One row in the drive list on the recruitment page. */
 export interface DriveListItem {
   id: string;
@@ -14,6 +22,8 @@ export interface DriveListItem {
   community_whatsapp_link: string | null; // 17A
   role_on_accept: string; // 17B
   role_label: string | null; // 17B
+  max_department_choices: number; // 17C
+  department_count: number; // 17C — for list display
   created_at: string;
   phase: Phase;
   applicant_count: number;
@@ -38,9 +48,11 @@ export interface DriveWithQuestions {
   community_whatsapp_link: string | null; // 17A
   role_on_accept: string; // 17B
   role_label: string | null; // 17B
+  max_department_choices: number; // 17C
   created_at: string;
   phase: Phase;
   questions: DriveQuestion[];
+  departments: DriveDepartment[]; // 17C
 }
 
 export interface DriveQuestion {
@@ -66,8 +78,9 @@ export async function listDrivesForClub(
     .select(
       `id, name, description, target_years, deadline, result_date,
        published_at, results_published_at, community_whatsapp_link,
-       role_on_accept, role_label, created_at,
-       applications(count)`,
+       role_on_accept, role_label, max_department_choices, created_at,
+       applications(count),
+       drive_departments(count)`,
     )
     .eq("club_id", clubId)
     .order("created_at", { ascending: false });
@@ -118,6 +131,8 @@ export async function listDrivesForClub(
       community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
       role_on_accept: r.role_on_accept ?? "volunteer", // 17B
       role_label: r.role_label ?? null, // 17B
+      max_department_choices: r.max_department_choices ?? 2, // 17C
+      department_count: r.drive_departments?.[0]?.count ?? 0, // 17C
       created_at: r.created_at,
       phase,
       applicant_count: r.applications?.[0]?.count ?? 0,
@@ -137,8 +152,10 @@ export async function getDriveWithQuestions(
     .select(
       `id, club_id, name, description, target_years, deadline, result_date,
        published_at, results_published_at, interview_whatsapp_link,
-       community_whatsapp_link, role_on_accept, role_label, created_at,
-       drive_questions(id, prompt, question_type, sort_order, required)`,
+       community_whatsapp_link, role_on_accept, role_label,
+       max_department_choices, created_at,
+       drive_questions(id, prompt, question_type, sort_order, required),
+       drive_departments(id, name, community_whatsapp_link, sort_order)`,
     )
     .eq("id", driveId)
     .order("sort_order", {
@@ -175,6 +192,7 @@ export async function getDriveWithQuestions(
     community_whatsapp_link: r.community_whatsapp_link ?? null, // 17A
     role_on_accept: r.role_on_accept ?? "volunteer", // 17B
     role_label: r.role_label ?? null, // 17B
+    max_department_choices: r.max_department_choices ?? 2, // 17C
     created_at: r.created_at,
     phase,
     questions: (r.drive_questions ?? []).map(
@@ -187,5 +205,10 @@ export async function getDriveWithQuestions(
         required: q.required,
       }),
     ),
+    // 17C: departments ordered by sort_order (Postgres doesn't sort embedded
+    // rows by default in this select; sort in-app to keep it predictable).
+    departments: ((r.drive_departments ?? []) as DriveDepartment[])
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order),
   } satisfies DriveWithQuestions;
 }

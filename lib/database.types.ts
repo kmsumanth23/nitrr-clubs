@@ -55,12 +55,14 @@ export type Database = {
       }
       applications: {
         Row: {
+          accepted_department_id: string | null
           club_id: string
           created_at: string
           id: string
           note: string | null
           note_at: string | null
           note_by: string | null
+          preferred_departments: string[] | null
           profile_id: string
           recruitment_id: string
           responses: Json
@@ -68,12 +70,14 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          accepted_department_id?: string | null
           club_id: string
           created_at?: string
           id?: string
           note?: string | null
           note_at?: string | null
           note_by?: string | null
+          preferred_departments?: string[] | null
           profile_id: string
           recruitment_id: string
           responses?: Json
@@ -81,12 +85,14 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          accepted_department_id?: string | null
           club_id?: string
           created_at?: string
           id?: string
           note?: string | null
           note_at?: string | null
           note_by?: string | null
+          preferred_departments?: string[] | null
           profile_id?: string
           recruitment_id?: string
           responses?: Json
@@ -94,6 +100,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "applications_accepted_department_id_fkey"
+            columns: ["accepted_department_id"]
+            isOneToOne: false
+            referencedRelation: "drive_departments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "applications_club_id_fkey"
             columns: ["club_id"]
@@ -247,6 +260,7 @@ export type Database = {
       }
       club_members: {
         Row: {
+          accepted_department_id: string | null
           club_id: string
           exclude_from_promote: boolean
           id: string
@@ -257,6 +271,7 @@ export type Database = {
           source_recruitment_id: string | null
         }
         Insert: {
+          accepted_department_id?: string | null
           club_id: string
           exclude_from_promote?: boolean
           id?: string
@@ -267,6 +282,7 @@ export type Database = {
           source_recruitment_id?: string | null
         }
         Update: {
+          accepted_department_id?: string | null
           club_id?: string
           exclude_from_promote?: boolean
           id?: string
@@ -277,6 +293,13 @@ export type Database = {
           source_recruitment_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "club_members_accepted_department_id_fkey"
+            columns: ["accepted_department_id"]
+            isOneToOne: false
+            referencedRelation: "drive_departments"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "club_members_club_id_fkey"
             columns: ["club_id"]
@@ -415,6 +438,41 @@ export type Database = {
             columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      drive_departments: {
+        Row: {
+          community_whatsapp_link: string | null
+          created_at: string
+          id: string
+          name: string
+          recruitment_id: string
+          sort_order: number
+        }
+        Insert: {
+          community_whatsapp_link?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          recruitment_id: string
+          sort_order?: number
+        }
+        Update: {
+          community_whatsapp_link?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          recruitment_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "drive_departments_recruitment_id_fkey"
+            columns: ["recruitment_id"]
+            isOneToOne: false
+            referencedRelation: "recruitments"
             referencedColumns: ["id"]
           },
         ]
@@ -651,6 +709,7 @@ export type Database = {
           id: string
           interview_mode: string | null
           interview_whatsapp_link: string | null
+          max_department_choices: number
           name: string | null
           published_at: string | null
           result_date: string | null
@@ -670,6 +729,7 @@ export type Database = {
           id?: string
           interview_mode?: string | null
           interview_whatsapp_link?: string | null
+          max_department_choices?: number
           name?: string | null
           published_at?: string | null
           result_date?: string | null
@@ -689,6 +749,7 @@ export type Database = {
           id?: string
           interview_mode?: string | null
           interview_whatsapp_link?: string | null
+          max_department_choices?: number
           name?: string | null
           published_at?: string | null
           result_date?: string | null
@@ -730,6 +791,14 @@ export type Database = {
       add_club_admin: {
         Args: { club_id_in: string; profile_id_in: string; tier_in: string }
         Returns: undefined
+      }
+      add_drive_department: {
+        Args: {
+          community_whatsapp_link_in: string
+          drive_id_in: string
+          name_in: string
+        }
+        Returns: string
       }
       add_drive_question: {
         Args: {
@@ -779,6 +848,7 @@ export type Database = {
           deadline_in: string
           description_in: string
           interview_whatsapp_link_in: string
+          max_department_choices_in: number
           name_in: string
           result_date_in: string
           role_label_in: string
@@ -797,6 +867,10 @@ export type Database = {
         Returns: undefined
       }
       delete_drive: { Args: { drive_id_in: string }; Returns: undefined }
+      delete_drive_department: {
+        Args: { department_id_in: string }
+        Returns: undefined
+      }
       delete_drive_question: {
         Args: { question_id_in: string }
         Returns: undefined
@@ -865,6 +939,10 @@ export type Database = {
         Returns: undefined
       }
       restore_club: { Args: { club_id_in: string }; Returns: undefined }
+      set_accepted_department: {
+        Args: { application_id_in: string; department_id_in: string }
+        Returns: undefined
+      }
       set_super_admin: {
         Args: { profile_id_in: string; value_in: boolean }
         Returns: undefined
@@ -882,6 +960,10 @@ export type Database = {
       }
       swap_category_order: {
         Args: { id_a: string; id_b: string }
+        Returns: undefined
+      }
+      swap_drive_department_order: {
+        Args: { id_a_in: string; id_b_in: string }
         Returns: undefined
       }
       swap_drive_question_order: {
@@ -903,6 +985,7 @@ export type Database = {
           description_in: string
           drive_id_in: string
           interview_whatsapp_link_in: string
+          max_department_choices_in: number
           name_in: string
           result_date_in: string
           role_label_in: string
@@ -913,6 +996,14 @@ export type Database = {
       }
       update_drive_community_link: {
         Args: { community_whatsapp_link_in: string; drive_id_in: string }
+        Returns: undefined
+      }
+      update_drive_department: {
+        Args: {
+          community_whatsapp_link_in: string
+          department_id_in: string
+          name_in: string
+        }
         Returns: undefined
       }
       update_drive_question: {

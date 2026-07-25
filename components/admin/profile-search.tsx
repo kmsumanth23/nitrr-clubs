@@ -4,20 +4,31 @@ import * as React from "react";
 import { IconSearch, IconUser } from "@tabler/icons-react";
 import {
   searchProfiles,
+  searchClubMembersForAdminAssignment,
   type ProfileSearchResult,
 } from "@/lib/queries/profile-search";
 
 /** Debounced typeahead that searches profiles by name/email/roll.
- *  Used inside the add-admin modal. Selecting a result calls onSelect with
- *  the profile; clearing the input clears the selection. */
+ *  Used inside the add-admin modal + promote-super-admin flow.
+ *
+ *  17C: `mode` switches the candidate set. Default `"global"` preserves the
+ *  historical behavior (searches all profiles, filtered by RLS). `"club_members"`
+ *  narrows to the given club's roster only — for the add-admin flow, so admin
+ *  tiers can only be assigned to people who are already members. */
 export function ProfileSearch({
   excludeClubId,
   selected,
   onSelect,
+  mode = "global",
+  clubId,
 }: {
   excludeClubId?: string;
   selected: ProfileSearchResult | null;
   onSelect: (profile: ProfileSearchResult | null) => void;
+  /** 17C: 'club_members' scopes candidates to the given club's members only. */
+  mode?: "global" | "club_members";
+  /** Required when `mode === "club_members"`. */
+  clubId?: string;
 }) {
   const [input, setInput] = React.useState("");
   const [results, setResults] = React.useState<ProfileSearchResult[]>([]);
@@ -47,7 +58,12 @@ export function ProfileSearch({
     }
     setLoading(true);
     const t = setTimeout(async () => {
-      const list = await searchProfiles(q, excludeClubId);
+      let list: ProfileSearchResult[] = [];
+      if (mode === "club_members" && clubId) {
+        list = await searchClubMembersForAdminAssignment(clubId, q);
+      } else {
+        list = await searchProfiles(q, excludeClubId);
+      }
       setResults(list);
       setLoading(false);
     }, 250);
@@ -55,7 +71,7 @@ export function ProfileSearch({
       clearTimeout(t);
       setLoading(false);
     };
-  }, [input, selected, excludeClubId]);
+  }, [input, selected, excludeClubId, mode, clubId]);
 
   if (selected) {
     return (
@@ -96,7 +112,11 @@ export function ProfileSearch({
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
-          placeholder="Search by name, email, or roll number…"
+          placeholder={
+            mode === "club_members"
+              ? "Search current members by name, email, or roll number"
+              : "Search by name, email, or roll number…"
+          }
           className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-ink-soft"
         />
       </div>

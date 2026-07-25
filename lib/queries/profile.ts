@@ -36,6 +36,16 @@ export interface MyMembership {
    *  render a second pill on their My Clubs card. Null when they're just a
    *  member. Values match `club_admins.admin_role` — `lead`/`manager`/`editor`. */
   admin_tier: string | null;
+  /** 17C: department the member was placed in (denorm on `club_members`).
+   *  Null when the source drive had no departments. `community_whatsapp_link`
+   *  on this record already flows into `club.community_whatsapp_link` below
+   *  via the resolver chain — this field is here so the UI can also show the
+   *  dept name as a pill. */
+  accepted_department: {
+    id: string;
+    name: string;
+    community_whatsapp_link: string | null;
+  } | null;
   club:
     | (Pick<
         Club,
@@ -257,9 +267,16 @@ export async function getMyProfileClubs(): Promise<MyProfileClub[]> {
  *  users see their clubs on /admin instead.
  *
  *  17B: replaces the 17A two-query drive-scoped community link resolver with a
- *  single embedded join on `source_recruitment_id`. Fallback chain per row:
- *    1. source_recruitment.community_whatsapp_link  (drive-specific)
- *    2. club.community_whatsapp_link                (club-level)
+ *  single embedded join on `source_recruitment_id`.
+ *
+ *  17C: extended resolver chain (3-tier):
+ *    1. accepted_department.community_whatsapp_link (dept-specific)
+ *    2. source_recruitment.community_whatsapp_link  (drive-specific)
+ *    3. club.community_whatsapp_link                (club-level)
+ *
+ *  The resolved link is written back onto `club.community_whatsapp_link` so
+ *  downstream (MyClubsList) is unchanged — the department is a new sibling
+ *  field for optional pill display.
  *
  *  Also fetches `admin_tier` for the web-admin overlay pill via a second
  *  scoped query on `club_admins` (embedding it in the same select doesn't
@@ -275,7 +292,9 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
     .from("club_members")
     .select(
       `club_id, joined_at, role, role_label, exclude_from_promote,
+       accepted_department_id,
        source_recruitment:recruitments!club_members_source_recruitment_id_fkey(community_whatsapp_link),
+       accepted_department:drive_departments!club_members_accepted_department_id_fkey(id, name, community_whatsapp_link),
        club:clubs(id, name, slug, community_whatsapp_link, instagram_url, archived_at, category:categories(*))`,
     )
     .eq("profile_id", user.id)
@@ -289,6 +308,11 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
     role_label: string | null;
     exclude_from_promote: boolean | null;
     source_recruitment: { community_whatsapp_link: string | null } | null;
+    accepted_department: {
+      id: string;
+      name: string;
+      community_whatsapp_link: string | null;
+    } | null;
     club: MyMembership["club"];
   }>;
   if (rows.length === 0) return [];
@@ -315,9 +339,11 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
   }
 
   return rows.map((r): MyMembership => {
+    // 17C: 3-tier resolver — dept → drive → club
+    const deptLink = r.accepted_department?.community_whatsapp_link ?? null;
     const driveLink = r.source_recruitment?.community_whatsapp_link ?? null;
     const clubLink = r.club?.community_whatsapp_link ?? null;
-    const resolvedCommunityLink = driveLink ?? clubLink;
+    const resolvedCommunityLink = deptLink ?? driveLink ?? clubLink;
     return {
       club_id: r.club_id,
       joined_at: r.joined_at,
@@ -325,6 +351,14 @@ export async function getMyMemberships(): Promise<MyMembership[]> {
       role_label: r.role_label,
       exclude_from_promote: r.exclude_from_promote ?? false,
       admin_tier: adminTierByClub.get(r.club_id) ?? null,
+      accepted_department: r.accepted_department
+        ? {
+            id: r.accepted_department.id,
+            name: r.accepted_department.name,
+            community_whatsapp_link:
+              r.accepted_department.community_whatsapp_link,
+          }
+        : null,
       club: r.club
         ? { ...r.club, community_whatsapp_link: resolvedCommunityLink }
         : null,

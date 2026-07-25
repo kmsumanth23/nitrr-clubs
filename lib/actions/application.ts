@@ -13,6 +13,70 @@ import { getPhase } from "@/lib/phase";
 export type ApplicationResult = { error?: string; ok?: boolean };
 
 /**
+ * 17C: Read + validate ranked department preferences from FormData.
+ * Field name: `preferredDepartments` — JSON-encoded string[].
+ *
+ * Rules:
+ *   - Drive has no departments → returns { value: null } regardless of input
+ *   - Drive has departments + student submitted an empty/absent picker
+ *     → error ("please rank at least one")
+ *   - Length must be ≤ drive.max_department_choices
+ *   - No duplicates; every UUID must belong to the drive's departments
+ *
+ * Length + belongs-to-drive checks can't live in the Zod schema because they
+ * depend on the drive being applied to. Schema (`preferredDepartmentsSchema`
+ * in `lib/validation/application.ts`) only shape-checks: array of UUIDs +
+ * no duplicates.
+ */
+function readPreferredDepartments(
+  formData: FormData,
+  driveDepartments: Array<{ id: string }>,
+  maxChoices: number | null | undefined,
+): { value: string[] | null } | { error: string } {
+  if (driveDepartments.length === 0) {
+    return { value: null };
+  }
+
+  const raw = formData.get("preferredDepartments");
+  if (typeof raw !== "string" || raw.length === 0) {
+    return { error: "Please rank at least one department preference." };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { error: "Could not parse department preferences." };
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { error: "Invalid department preferences format." };
+  }
+
+  const asUuids = parsed as string[];
+  const capped = typeof maxChoices === "number" ? maxChoices : 2;
+
+  if (asUuids.length === 0) {
+    return { error: "Please rank at least one department preference." };
+  }
+  if (asUuids.length > capped) {
+    return { error: `You can rank at most ${capped} departments.` };
+  }
+  if (new Set(asUuids).size !== asUuids.length) {
+    return { error: "You can't pick the same department twice." };
+  }
+
+  const validDeptIds = new Set(driveDepartments.map((d) => d.id));
+  for (const uuid of asUuids) {
+    if (typeof uuid !== "string" || !validDeptIds.has(uuid)) {
+      return { error: "Invalid department selected." };
+    }
+  }
+
+  return { value: asUuids };
+}
+
+/**
  * 16B: Apply targets a specific drive by id.
  *
  * Layers of gating (defense in depth):
@@ -46,15 +110,16 @@ export async function submitApplication(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Please sign in." };
 
-  // Drive + questions + club slug + student's year in parallel.
+  // Drive + questions + club slug + departments + student's year in parallel.
   const [driveRes, profileRes] = await Promise.all([
     supabase
       .from("recruitments")
       .select(
         `id, club_id, target_years, deadline, result_date,
-         published_at, results_published_at,
+         published_at, results_published_at, max_department_choices,
          club:clubs(slug),
-         drive_questions(id, question_type, required)`,
+         drive_questions(id, question_type, required),
+         drive_departments(id)`,
       )
       .eq("id", driveId)
       .not("published_at", "is", null)
@@ -124,6 +189,20 @@ export async function submitApplication(
     return { error: parsed.error.issues[0].message };
   }
 
+  // 17C: ranked department preferences. Required if the drive has any
+  // departments; length capped by `max_department_choices`; duplicates and
+  // strangers rejected. When the drive has no departments, this stays null.
+  const driveDepartments = (drive.drive_departments ?? []) as Array<{
+    id: string;
+  }>;
+  const prefsOrError = readPreferredDepartments(
+    formData,
+    driveDepartments,
+    drive.max_department_choices,
+  );
+  if ("error" in prefsOrError) return { error: prefsOrError.error };
+  const preferredDepartments = prefsOrError.value;
+
   // Existing application to this drive? Revive; else insert.
   const { data: existing } = await supabase
     .from("applications")
@@ -135,7 +214,11 @@ export async function submitApplication(
   if (existing) {
     const { error } = await supabase
       .from("applications")
-      .update({ status: "pending", responses: parsed.data })
+      .update({
+        status: "pending",
+        responses: parsed.data,
+        preferred_departments: preferredDepartments, // 17C
+      } as never)
       .eq("id", existing.id);
     if (error) return { error: error.message };
   } else {
@@ -145,7 +228,8 @@ export async function submitApplication(
       profile_id: user.id,
       status: "pending",
       responses: parsed.data,
-    });
+      preferred_departments: preferredDepartments, // 17C
+    } as never);
     if (error) return { error: error.message };
   }
 
@@ -179,7 +263,9 @@ export async function updateApplication(
       `id, profile_id, recruitment_id,
        recruitment:recruitments(
          id, deadline, result_date, published_at, results_published_at,
-         drive_questions(id, question_type, required)
+         max_department_choices,
+         drive_questions(id, question_type, required),
+         drive_departments(id)
        )`,
     )
     .eq("id", applicationId)
@@ -213,9 +299,24 @@ export async function updateApplication(
     return { error: parsed.error.issues[0].message };
   }
 
+  // 17C: re-validate ranked prefs on edit too (drive may have changed).
+  const driveDepartments = (rec.drive_departments ?? []) as Array<{
+    id: string;
+  }>;
+  const prefsOrError = readPreferredDepartments(
+    formData,
+    driveDepartments,
+    rec.max_department_choices,
+  );
+  if ("error" in prefsOrError) return { error: prefsOrError.error };
+  const preferredDepartments = prefsOrError.value;
+
   const { error } = await supabase
     .from("applications")
-    .update({ responses: parsed.data })
+    .update({
+      responses: parsed.data,
+      preferred_departments: preferredDepartments, // 17C
+    } as never)
     .eq("id", applicationId);
   if (error) return { error: error.message };
 

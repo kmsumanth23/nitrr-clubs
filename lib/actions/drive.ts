@@ -13,6 +13,10 @@ import {
   deleteQuestionSchema,
   swapQuestionOrderSchema,
   updateDriveCommunityLinkSchema,
+  addDepartmentSchema,
+  updateDepartmentSchema,
+  deleteDepartmentSchema,
+  swapDepartmentOrderSchema,
 } from "@/lib/validation/drive";
 
 /** Common result shape for drive actions. Flat all-optional (matches the
@@ -55,6 +59,15 @@ function readRoleLabelOrNull(formData: FormData): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/** 17C: same preserve-when-absent semantics for `maxDepartmentChoices`. Pre-
+ *  Batch-2 UI doesn't render this input; the RPC coalesces null → existing. */
+function readMaxDepartmentChoicesOrNull(formData: FormData): number | null {
+  const raw = formData.get("maxDepartmentChoices");
+  if (typeof raw !== "string" || raw.trim().length === 0) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 // ============================================================================
 // 1. createDrive — creates in DRAFT mode + auto-populates 3 default questions
 // ============================================================================
@@ -77,6 +90,7 @@ export async function createDrive(
     communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
     roleOnAccept: formData.get("roleOnAccept") ?? undefined, // 17B — Zod default kicks in when undefined
     roleLabel: formData.get("roleLabel") ?? "",
+    maxDepartmentChoices: formData.get("maxDepartmentChoices") ?? 2, // 17C
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -95,6 +109,7 @@ export async function createDrive(
     community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null, // 17A
     role_on_accept_in: parsed.data.roleOnAccept, // 17B
     role_label_in: parsed.data.roleLabel ?? null, // 17B
+    max_department_choices_in: parsed.data.maxDepartmentChoices, // 17C
   } as never);
   if (error) {
     console.error("createDrive rpc failed:", error);
@@ -150,6 +165,8 @@ export async function updateDrive(
     // the actual value flows through.
     roleOnAccept: readRoleOrNull(formData),
     roleLabel: readRoleLabelOrNull(formData),
+    // 17C: null preserves existing max on the RPC side (matches 17B pattern).
+    maxDepartmentChoices: readMaxDepartmentChoicesOrNull(formData),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -167,6 +184,8 @@ export async function updateDrive(
     // 17B: null means "preserve existing" — see helpers + updateDriveSchema.
     role_on_accept_in: parsed.data.roleOnAccept ?? null,
     role_label_in: parsed.data.roleLabel ?? null,
+    // 17C: null preserves existing max_department_choices.
+    max_department_choices_in: parsed.data.maxDepartmentChoices ?? null,
   } as never);
   if (error) {
     console.error("updateDrive rpc failed:", error);
@@ -387,4 +406,126 @@ export async function updateDriveCommunityLink(
 
   revalidateDrive(clubSlug, parsed.data.driveId);
   return { ok: true, driveId: parsed.data.driveId };
+}
+
+// ============================================================================
+// 10. 17C — Department CRUD actions
+//     - addDriveDepartment (draft only, RPC-enforced)
+//     - updateDriveDepartment (all phases, name + link)
+//     - deleteDriveDepartment (draft only + renormalizes prefs, RPC-enforced)
+//     - swapDriveDepartmentOrder (draft only, RPC-enforced)
+// ============================================================================
+
+export async function addDriveDepartment(
+  _prev: DriveResult,
+  formData: FormData,
+): Promise<DriveResult> {
+  const clubSlug = formData.get("__club_slug") as string;
+  const driveId = formData.get("driveId") as string;
+
+  const parsed = addDepartmentSchema.safeParse({
+    driveId,
+    name: formData.get("name"),
+    communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("add_drive_department", {
+    drive_id_in: parsed.data.driveId,
+    name_in: parsed.data.name,
+    community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null,
+  } as never);
+  if (error) {
+    console.error("addDriveDepartment rpc failed:", error);
+    return { error: error.message };
+  }
+
+  revalidateDrive(clubSlug, parsed.data.driveId);
+  return {
+    ok: true,
+    driveId: parsed.data.driveId,
+    questionId: data as unknown as string,
+  };
+}
+
+export async function updateDriveDepartment(
+  _prev: DriveResult,
+  formData: FormData,
+): Promise<DriveResult> {
+  const clubSlug = formData.get("__club_slug") as string;
+  const driveId = formData.get("driveId") as string;
+
+  const parsed = updateDepartmentSchema.safeParse({
+    departmentId: formData.get("departmentId"),
+    name: formData.get("name"),
+    communityWhatsappLink: formData.get("communityWhatsappLink") ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("update_drive_department", {
+    department_id_in: parsed.data.departmentId,
+    name_in: parsed.data.name,
+    community_whatsapp_link_in: parsed.data.communityWhatsappLink ?? null,
+  } as never);
+  if (error) {
+    console.error("updateDriveDepartment rpc failed:", error);
+    return { error: error.message };
+  }
+
+  revalidateDrive(clubSlug, driveId);
+  return { ok: true, driveId };
+}
+
+export async function deleteDriveDepartment(
+  _prev: DriveResult,
+  formData: FormData,
+): Promise<DriveResult> {
+  const clubSlug = formData.get("__club_slug") as string;
+  const driveId = formData.get("driveId") as string;
+
+  const parsed = deleteDepartmentSchema.safeParse({
+    departmentId: formData.get("departmentId"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("delete_drive_department", {
+    department_id_in: parsed.data.departmentId,
+  } as never);
+  if (error) {
+    console.error("deleteDriveDepartment rpc failed:", error);
+    return { error: error.message };
+  }
+
+  revalidateDrive(clubSlug, driveId);
+  return { ok: true, driveId };
+}
+
+export async function swapDriveDepartmentOrder(
+  _prev: DriveResult,
+  formData: FormData,
+): Promise<DriveResult> {
+  const clubSlug = formData.get("__club_slug") as string;
+  const driveId = formData.get("driveId") as string;
+
+  const parsed = swapDepartmentOrderSchema.safeParse({
+    idA: formData.get("idA"),
+    idB: formData.get("idB"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("swap_drive_department_order", {
+    id_a_in: parsed.data.idA,
+    id_b_in: parsed.data.idB,
+  } as never);
+  if (error) {
+    console.error("swapDriveDepartmentOrder rpc failed:", error);
+    return { error: error.message };
+  }
+
+  revalidateDrive(clubSlug, driveId);
+  return { ok: true, driveId };
 }
