@@ -7,6 +7,7 @@ import {
   type ApplicationResult,
 } from "@/lib/actions/application";
 import { WhatsAppLinkButton } from "@/components/ui/whatsapp-link-popup";
+import { DepartmentPreferencesPicker } from "@/components/clubs/department-preferences-picker";
 
 interface KnownProfile {
   full_name: string | null;
@@ -27,6 +28,14 @@ interface ExistingApplication {
   id: string;
   status: string;
   responses: Record<string, string>;
+  /** 17C: student's prior ranked prefs — pre-fills the picker on re-open. */
+  preferred_departments: string[] | null;
+}
+
+interface ApplyDepartment {
+  id: string;
+  name: string;
+  sort_order: number;
 }
 
 /**
@@ -42,6 +51,8 @@ export function ApplyForm({
   questions,
   existingApplication,
   interviewWhatsappLink,
+  departments,
+  maxDepartmentChoices,
 }: {
   driveId: string;
   clubSlug: string;
@@ -50,6 +61,10 @@ export function ApplyForm({
   questions: Question[];
   existingApplication: ExistingApplication | null;
   interviewWhatsappLink: string | null;
+  /** 17C: drive's departments; empty array means no picker. */
+  departments: ApplyDepartment[];
+  /** 17C: cap on how many the student can rank. */
+  maxDepartmentChoices: number;
 }) {
   const [state, formAction] = useActionState<ApplicationResult, FormData>(
     submitApplication,
@@ -108,6 +123,16 @@ export function ApplyForm({
           <Field label="Branch" value={profile.branch} />
         </div>
       </div>
+
+      {/* 17C: department preferences picker — only if drive has departments.
+          Sits between "Applying as" and question fields. */}
+      {departments.length > 0 && (
+        <DepartmentPreferencesPicker
+          departments={departments}
+          maxChoices={maxDepartmentChoices}
+          defaultValue={existingApplication?.preferred_departments ?? null}
+        />
+      )}
 
       {questions
         .slice()

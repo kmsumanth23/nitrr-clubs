@@ -182,6 +182,8 @@ export default async function AdminApplicationsPage({
             clubSlug={slug}
             phase={phase}
             questions={drive.questions}
+            departments={drive.departments}
+            driveId={drive.id}
           />
         </>
       )}

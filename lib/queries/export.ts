@@ -12,12 +12,19 @@ export interface ClubRosterAdminRow extends PersonRow {
   type: "admin";
   tier: "lead" | "manager" | "editor";
   since: string | null; // no separate timestamp on club_admins; null for v1
+  /** 17C: admins don't have departments (departments come from being accepted
+   *  into a drive as a member). Always null on this row. Included for shape
+   *  parity so the CSV emitter can read `r.department` on either union arm. */
+  department: null;
 }
 
 export interface ClubRosterMemberRow extends PersonRow {
   type: "member";
   tier: null;
   since: string; // joined_at
+  /** 17C: department the member was placed in (denorm on `club_members`).
+   *  Null when the source drive had no departments or predates 17C. */
+  department: string | null;
 }
 
 export type ClubRosterRow = ClubRosterAdminRow | ClubRosterMemberRow;
@@ -37,7 +44,9 @@ export async function getClubRoster(clubId: string): Promise<ClubRosterRow[]> {
     supabase
       .from("club_members")
       .select(
-        "joined_at, profile:profiles!club_members_profile_id_fkey(full_name, email, roll_number, year, branch)",
+        `joined_at,
+         profile:profiles!club_members_profile_id_fkey(full_name, email, roll_number, year, branch),
+         accepted_department:drive_departments!club_members_accepted_department_id_fkey(name)`,
       )
       .eq("club_id", clubId),
   ]);
@@ -53,6 +62,7 @@ export async function getClubRoster(clubId: string): Promise<ClubRosterRow[]> {
       year: a.profile?.year ?? null,
       branch: a.profile?.branch ?? null,
       since: null,
+      department: null,
     }),
   );
 
@@ -67,6 +77,7 @@ export async function getClubRoster(clubId: string): Promise<ClubRosterRow[]> {
       year: m.profile?.year ?? null,
       branch: m.profile?.branch ?? null,
       since: m.joined_at,
+      department: (m.accepted_department?.name as string | undefined) ?? null,
     }),
   );
 

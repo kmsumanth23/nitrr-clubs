@@ -137,6 +137,8 @@ export default async function DriveApplyPage({
           questions={driveInfo.drive.questions}
           existingApplication={driveInfo.existing_application}
           interviewWhatsappLink={driveInfo.drive.interview_whatsapp_link}
+          departments={driveInfo.drive.departments}
+          maxDepartmentChoices={driveInfo.drive.max_department_choices}
         />
       )}
     </section>

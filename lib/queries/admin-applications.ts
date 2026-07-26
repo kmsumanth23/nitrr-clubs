@@ -183,6 +183,13 @@ export interface DriveQuestionForReview {
   required: boolean;
 }
 
+/** 17C: minimal shape for the applications page's placement affordance. */
+export interface DriveDepartmentForReview {
+  id: string;
+  name: string;
+  sort_order: number;
+}
+
 export interface DriveForReview {
   id: string;
   name: string | null;
@@ -195,6 +202,8 @@ export interface DriveForReview {
   created_at: string;
   phase: Phase;
   questions: DriveQuestionForReview[];
+  /** 17C: empty array when the drive has no departments (opt-in). */
+  departments: DriveDepartmentForReview[];
 }
 
 /** Per-drive applications page: drive metadata + its questions (so response
@@ -263,6 +272,7 @@ export async function getApplicationsForDrive(
         required: q.required,
       }),
     ),
+    departments: [], // 17C: populated below after fetching drive_departments
   };
 
   const { data: appsData, error: appsErr } = await supabase
@@ -278,14 +288,17 @@ export async function getApplicationsForDrive(
 
   const applications = (appsData ?? []) as AdminApplication[];
 
-  // 17C: fetch drive's departments once for resolving preference UUIDs to names
+  // 17C: fetch drive's departments once for resolving preference UUIDs to
+  // names + surfacing the ordered list to the admin UI. `sort_order` ensures
+  // the placement dropdown mirrors the drive-editor ordering.
   const { data: driveDepts } = await supabase
     .from("drive_departments")
-    .select("id, name")
-    .eq("recruitment_id", driveId);
-  const deptById = new Map<string, string>(
-    (driveDepts ?? []).map((d: { id: string; name: string }) => [d.id, d.name]),
-  );
+    .select("id, name, sort_order")
+    .eq("recruitment_id", driveId)
+    .order("sort_order", { ascending: true });
+  const deptRows = (driveDepts ?? []) as DriveDepartmentForReview[];
+  const deptById = new Map<string, string>(deptRows.map((d) => [d.id, d.name]));
+  drive.departments = deptRows;
 
   // Fetch note history for all applications in one shot, then stitch onto rows.
   // Separate query rather than an embedded join so RLS on applications and

@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
     "Roll number",
     "Year",
     "Branch",
+    "Department",
     "Since",
   ];
   const data = rows.map((r) => [
@@ -69,6 +70,7 @@ export async function GET(req: NextRequest) {
     anonymize ? anonymizeRoll(r.roll_number) : (r.roll_number ?? ""),
     r.year ?? "",
     r.branch ?? "",
+    r.department ?? "",
     r.since ?? "",
   ]);
 

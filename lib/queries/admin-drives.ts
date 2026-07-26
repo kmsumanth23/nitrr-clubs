@@ -26,6 +26,9 @@ export interface DriveListItem {
   department_count: number; // 17C — for list display
   created_at: string;
   phase: Phase;
+  /** Live applications (pending / reviewing / accepted / rejected). Excludes
+   *  withdrawn + removed — those are terminal and don't reflect actionable
+   *  applicants. This is what the UI shows on drive rows and pickers. */
   applicant_count: number;
   /** 16B: applications in `pending` or `reviewing` status. Used by the
    *  admin recruitment list to show "N pending" pill on Open/Review
@@ -53,6 +56,10 @@ export interface DriveWithQuestions {
   phase: Phase;
   questions: DriveQuestion[];
   departments: DriveDepartment[]; // 17C
+  /** Live applications (pending / reviewing / accepted / rejected). Excludes
+   *  withdrawn + removed. Used by the drive-editor Danger Zone to gate
+   *  "delete open drive". Matches `DriveListItem.applicant_count` semantics. */
+  applicant_count: number;
 }
 
 export interface DriveQuestion {
@@ -64,11 +71,12 @@ export interface DriveQuestion {
 }
 
 /** List all drives for a club (draft + open + review + result), newest first.
- *  Applicant count computed via Supabase embedded-resource count.
  *
- *  Pending count is a separate grouped-by query since Supabase's embedded
- *  count doesn't support filtered aggregates on the same relation. Cheap:
- *  one round-trip on top of the main fetch. */
+ *  Live applicant count + pending count are both derived from a single
+ *  secondary fetch of non-terminal applications (pending / reviewing /
+ *  accepted / rejected). Withdrawn + removed are omitted so drive rows
+ *  reflect actionable applicants only. Same 1-extra-round-trip cost as
+ *  the previous split fetch. */
 export async function listDrivesForClub(
   clubId: string,
 ): Promise<DriveListItem[]> {
@@ -79,7 +87,6 @@ export async function listDrivesForClub(
       `id, name, description, target_years, deadline, result_date,
        published_at, results_published_at, community_whatsapp_link,
        role_on_accept, role_label, max_department_choices, created_at,
-       applications(count),
        drive_departments(count)`,
     )
     .eq("club_id", clubId)
@@ -94,22 +101,31 @@ export async function listDrivesForClub(
   const rows = (data ?? []) as any[];
   if (rows.length === 0) return [];
 
-  // 16B: pending counts grouped by recruitment_id. Second query; cheap.
+  // Live-status apps for these drives — grouped counts computed in-memory.
+  // "Live" excludes withdrawn + removed (both terminal). Pending count is a
+  // subset (pending + reviewing).
   const driveIds = rows.map((r) => r.id);
-  const { data: pendingRows } = await supabase
+  const { data: liveRows } = await supabase
     .from("applications")
     .select("recruitment_id, status")
     .in("recruitment_id", driveIds)
-    .in("status", ["pending", "reviewing"]);
+    .in("status", ["pending", "reviewing", "accepted", "rejected"]);
+  const liveByDrive = new Map<string, number>();
   const pendingByDrive = new Map<string, number>();
-  for (const row of (pendingRows ?? []) as Array<{
+  for (const row of (liveRows ?? []) as Array<{
     recruitment_id: string;
     status: string;
   }>) {
-    pendingByDrive.set(
+    liveByDrive.set(
       row.recruitment_id,
-      (pendingByDrive.get(row.recruitment_id) ?? 0) + 1,
+      (liveByDrive.get(row.recruitment_id) ?? 0) + 1,
     );
+    if (row.status === "pending" || row.status === "reviewing") {
+      pendingByDrive.set(
+        row.recruitment_id,
+        (pendingByDrive.get(row.recruitment_id) ?? 0) + 1,
+      );
+    }
   }
 
   return rows.map((r) => {
@@ -135,7 +151,7 @@ export async function listDrivesForClub(
       department_count: r.drive_departments?.[0]?.count ?? 0, // 17C
       created_at: r.created_at,
       phase,
-      applicant_count: r.applications?.[0]?.count ?? 0,
+      applicant_count: liveByDrive.get(r.id) ?? 0,
       pending_count: pendingByDrive.get(r.id) ?? 0,
     } satisfies DriveListItem;
   });
@@ -178,6 +194,15 @@ export async function getDriveWithQuestions(
     results_published_at: r.results_published_at,
   }) as Phase;
 
+  // Live applicant count: excludes withdrawn + removed. Head-only fetch
+  // (no rows returned, just the count). Matches the `applicant_count`
+  // semantics on DriveListItem — one number, everywhere.
+  const { count: liveCount } = await supabase
+    .from("applications")
+    .select("id", { count: "exact", head: true })
+    .eq("recruitment_id", driveId)
+    .not("status", "in", "(withdrawn,removed)");
+
   return {
     id: r.id,
     club_id: r.club_id,
@@ -210,5 +235,6 @@ export async function getDriveWithQuestions(
     departments: ((r.drive_departments ?? []) as DriveDepartment[])
       .slice()
       .sort((a, b) => a.sort_order - b.sort_order),
+    applicant_count: liveCount ?? 0,
   } satisfies DriveWithQuestions;
 }

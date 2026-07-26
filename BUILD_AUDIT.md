@@ -2043,3 +2043,219 @@ Batch 2 UI is the natural test surface for all four.
 Say "17C Batch 1 clean" once smoke-tested through the 5 routes listed above. Batch 2 (UI) is next.
 
 Let me know when goal is achived.
+
+---
+
+# 17C Batch 2 — UI layer for departments (Shipped)
+
+Scope: 5 new components + 6 patched surfaces + 1 query extension. Every UI touchpoint for the Batch 1 server layer — drive-editor departments section with draft caution banner, apply-form ranked picker, admin review preferences + placement affordance ("Placement needed" red badge on unplaced accepted apps), My Clubs department pill, and the club-detail community link resolver switched to the 3-tier chain via `club_members` embeds.
+
+Spec source: [files (11)/](files%20\(11\)/) (`SETUP_STEP17C_BATCH2.md` + `17c_batch2_patches.md` + 5 pre-authored component files).
+
+## Feature summary (as shipped)
+
+- **Draft caution banner.** `sessionStorage`-dismissible-per-drive, shown only in draft phase. Reminds admins that add/delete/reorder of departments + questions and the choice cap are locked at publish. Auto-hides post-publish regardless of dismissal state.
+- **Departments section (Section 3).** Rendered as top-level sibling of Sections 1 & 2 (spec called it out — not nested inside `<form id="drive-form">`, which would collide with the section's own inner forms). Phase-gated per Q5→C: draft allows everything; open/review lock add/delete/reorder (soft-disabled with tooltip) but allow name + link edits; result phase locks everything except name + link.
+- **MaxChoicesPicker.** Auto-writes into the hidden `maxDepartmentChoices` input on the main drive form; the next form save propagates the value. Draft-only editable.
+- **Add-department form + inline department rows.** Row saves on blur via `updateDriveDepartment`; delete button uses a click-then-confirm-within-3s pattern; reorder via up/down chevrons calling `swapDriveDepartmentOrder`.
+- **Ranked preferences picker on the apply form.** N dropdowns where N = `max_department_choices`; 1st slot required (`<select required>`); dynamic filtering so a selected dept becomes disabled in other rows. Serializes as JSON in a hidden `preferredDepartments` input consumed by `readPreferredDepartments` server-side. Renders only when the drive has ≥1 department.
+- **Admin review row placement affordance.** For accepted apps on drives with departments: shows either the `Placed: {name}` pill + Change button OR the "Placement needed" red badge + Assign button. Opens a modal with a dropdown of all drive departments → `setAcceptedDepartment` RPC.
+- **Preferences display inside review modal.** Ranked ordered list; falls back to "No preferences recorded" for pre-17C or edge-case rows. Only renders when the drive has departments.
+- **My Clubs department pill.** New beige pill alongside role + web-admin pills. Renders only when `membership.accepted_department` is set (drives without departments continue rendering the card unchanged).
+- **Club detail community link resolver rewritten.** Old 17A applications-walk replaced with a single `club_members` embed query on `source_recruitment` + `accepted_department`. Same 3-tier chain as `getMyMemberships` — dept → drive → club.
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| new | [components/admin/draft-caution-banner.tsx](components/admin/draft-caution-banner.tsx) | `sessionStorage`-dismissible per-drive; hydration-safe (`mounted` gate). |
+| new | [components/admin/departments-section.tsx](components/admin/departments-section.tsx) | Wrapper: header + count + Structure-locked pill; `MaxChoicesPicker` (draft-only enabled, DOM-syncs hidden input on `#drive-form`); department list; `AddDepartmentForm` (draft-only); lock-explainer footer for open/review. |
+| new | [components/admin/department-row.tsx](components/admin/department-row.tsx) | Inline editor row: name + link inputs (blur-save via `updateDriveDepartment`), reorder chevrons (draft-only, calls `swapDriveDepartmentOrder`), 3-second confirm-to-delete pattern. |
+| new | [components/clubs/department-preferences-picker.tsx](components/clubs/department-preferences-picker.tsx) | Ranked N-slot picker with dynamic filtering (`takenByOthers` set); serializes to hidden `preferredDepartments` JSON input; pre-fills from `existingApplication.preferred_departments` and strips deleted-dept references. |
+| new | [components/admin/placement-decision-form.tsx](components/admin/placement-decision-form.tsx) | Inline pill (placement OR red badge) + Change/Assign button → modal with dept `<select>` → `setAcceptedDepartment` RPC. Auto-closes on `state.ok`. |
+| patch | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | Imports + `maxDepartmentChoices` state (initial value only; setter intentionally unused — the section's picker DOM-syncs the hidden input); hidden input inside `#drive-form`; `<DraftCautionBanner>` at top (draft only); `<DepartmentsSection>` after Section 2 as top-level sibling (Lesson 7/23). |
+| patch | [components/clubs/apply-form.tsx](components/clubs/apply-form.tsx) | `ExistingApplication.preferred_departments` on interface; new `ApplyDepartment` type + `departments` / `maxDepartmentChoices` props; picker rendered between "Applying as" and questions when `departments.length > 0`. |
+| patch | [app/(student)/clubs/[slug]/apply/[driveId]/page.tsx](app/(student)/clubs/[slug]/apply/[driveId]/page.tsx) | Passes `driveInfo.drive.departments` + `driveInfo.drive.max_department_choices` to `<ApplyForm>`. |
+| patch | [components/admin/application-review-row.tsx](components/admin/application-review-row.tsx) | `departments` + `driveId` props; `<PlacementDecisionForm>` in row header for accepted apps on drives with depts; preferences ordered-list block in modal detail (above Q&A). |
+| patch | [components/admin/applications-filter.tsx](components/admin/applications-filter.tsx) | Thread `departments` + `driveId` through the filter + list into the row. |
+| patch | [app/(admin)/admin/clubs/[slug]/applications/page.tsx](app/(admin)/admin/clubs/[slug]/applications/page.tsx) | Pass `drive.departments` + `drive.id` to `<ApplicationsFilter>`. |
+| patch | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | New `DriveDepartmentForReview` shape; `departments: DriveDepartmentForReview[]` on `DriveForReview`; extended the dept fetch to include `sort_order` + `.order(...)`; populated back onto the returned `drive`. |
+| patch | [components/profile/my-clubs-list.tsx](components/profile/my-clubs-list.tsx) | Third pill (beige, dept name) alongside role + web-admin pills. Conditional on `membership.accepted_department`. |
+| patch | [app/(marketing)/clubs/[slug]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx) | Replaced the 17A applications-walk with a single `club_members` embed on `source_recruitment` + `accepted_department`. 3-tier chain (dept → drive → club) mirrors `getMyMemberships`. |
+
+## Deviations from the spec (worth flagging)
+
+1. **`DriveForReview` extended in the query layer** rather than fetched inline on the page. Spec's Patch 3 suggested "the parent page fetches drive.departments"; the drive query already had all the data (deptRows built for name resolution in Batch 1), so extending `DriveForReview.departments` and pushing the same array through was one line vs. a redundant query on the page. Also matches the `drive.questions` shape already there.
+2. **`maxDepartmentChoices` state on the form uses a value-only `useState` (setter dropped).** Spec's Edit 2 declared both. The section's `MaxChoicesPicker` writes directly to the hidden input via DOM (spec's own approach) — the parent's setter would only serve to duplicate state that would drift from the DOM. Dropped it to avoid `no-unused-vars` and confusion about which side of the state to trust.
+3. **`FilterDepartment` shape** kept minimal `{id, name}` in `applications-filter.tsx` to avoid pulling `sort_order` through props the filter doesn't use. `DriveForReview.departments` returns `sort_order` for callers who want it (currently no one downstream needs it after ordering is done in the SQL).
+4. **Preferences block styling** used the spec's exact classes; no visual departure. Rendered above the Q&A section per spec.
+5. **`PlacementDecisionForm`** placed inside the row header (`.flex.flex-wrap.items-center.justify-end.gap-2`) so the pills wrap gracefully on narrower widths. Spec said "near the status pill" — this is the same visual location, just uses flex-wrap for mobile-safety.
+6. **Nested-form audit passed clean.** `DepartmentsSection`'s `AddDepartmentForm` renders as a sibling of `DepartmentRow` items; `DepartmentRow` uses `useActionState` dispatched programmatically (no `<form>` element for update/reorder/delete) — safe by construction. Placement modal and View modal in the review row are direct children of `<li>` (not nested inside any form).
+7. **`applications-filter.tsx` split into `FilterAndList` + `ApplicationsFilter`** — spec left the wrapper intact; I threaded the same props through both (avoids re-plumbing on the next patch).
+8. **`drive.departments` fallback `?? []`** kept on the drive-editor `DepartmentsSection` render — Batch 1's mapper already sorts + defaults, but a defensive fallback protects against any partial-fetch edge case.
+
+## Verification
+
+- `npx tsc --noEmit` — exit 0.
+- Nested-form audit: 4 forms in `drive-editor-form.tsx` (main + publish + danger + result-community) all top-level siblings; `DepartmentsSection` rendered after Section 2 outside the main form (line 468 closes; line 532 opens). Row-level review row: `PlacementDecisionForm`'s modal + View modal are siblings inside `<li>` — no ancestor is a form.
+- Import-graph grep: all 5 new components consumed in exactly one place (`DepartmentsSection` in drive editor, `DraftCautionBanner` in drive editor, `DepartmentPreferencesPicker` in apply form, `PlacementDecisionForm` in review row, `DepartmentRow` in departments section).
+- Small IDE-diagnostics false positives during incremental edits (unused-import warnings mid-sequence) — cleared on the immediate follow-up edits that consumed them.
+
+## Not verified here (needs live smoke test)
+
+- Draft caution banner: dismiss persistence across refresh, reset on new session, auto-hide on publish.
+- Departments section: add/edit/reorder/delete flows, phase-gate tooltips, deletion renormalization visible via subsequent apply.
+- Apply form picker: 1st-choice required, dynamic filtering, edit-application preferences pre-fill and update.
+- Admin review: preferences ordered list rendering, auto-default placement on accept, "Placement needed" red badge on cleared placement, publish gate rejects unplaced accepted apps.
+- My Clubs pill visible only when placement exists; regression on pre-17C data.
+- Club detail community link chain: dept > drive > club fallback and gated to members only.
+
+Full smoke checklist is in [files (11)/SETUP_STEP17C_BATCH2.md](files%20\(11\)/SETUP_STEP17C_BATCH2.md) sections A-J.
+
+## What Batch 2 does NOT touch
+
+- Server layer (Batch 1 owns it).
+- Admin members page department display (deferred per spec — data is on `ClubMemberView` but no visual added).
+- Public club team display (step 21).
+- Notify-on-drive-edit (step 20).
+- Any 17A / 17B UI beyond the touched surfaces.
+
+## After Batch 2
+
+17C is UI-complete end-to-end. Pending user smoke through checklist A-J in the setup doc. Next per roadmap:
+- **Step 18** — Post-17 maintenance sweep (dead code + column drops)
+- **Step 19** — Post-deploy security (year impersonation, safeNext, signout CSRF)
+- Then feature steps 20 onward.
+
+17C closes the recruitment system feature build.
+
+---
+
+# 17C Batch 2 — Addendum 1 (Post-smoke fixes + drives-page polish) (Shipped)
+
+Batch of ten fixes and small features caught while smoke-testing 17C Batch 2. Some are polish requested during testing, some are latent bugs (mostly on 16A/17B infrastructure) that surfaced only once the feature was in real use. All are grouped here because they're outside 17C's Batch 2 scope but landed in the same working session — anchoring them together keeps the change history walkable.
+
+## Feature summary (as shipped)
+
+**UI polish + new surfaces**
+- **Draft caution banner now shows in create mode too.** Previously gated on `isEdit && phase === "draft"`, so it only appeared after "Save as Draft". The banner is most useful *before* commitment; it now renders whenever the drive is pre-publish (create OR edit-draft). Session-storage key falls back to `new:{clubId}` in create mode.
+- **Draft caution banner copy rewritten** to match the actual phase-lock progression (see the "Gate reality" section below). The old copy claimed questions lock at publish — they don't; they lock at the deadline. New copy is a 3-bullet timeline: Publish → deps + choice cap freeze; Deadline (Review) → questions freeze; Results published → everything freezes except community links.
+- **Drives list grouped by phase.** Recruitment page (`/admin/clubs/[slug]/recruitment`) now renders four sections top-to-bottom: **Open → Review → Draft → Results**. Each section has a count + one-line helper. Empty sections are hidden. Within a section, newest-first is preserved. Drives auto-transition between sections on next page load via `getPhase()` computing from `deadline` / `result_date` / `published_at` / `results_published_at`.
+- **DriveTimelineCard sidebar on the drive editor.** New component ([drive-timeline-card.tsx](components/admin/drive-timeline-card.tsx)) — 3-stage vertical timeline (Open → Review → Results) with the current stage highlighted in indigo with a "CURRENT" pill. Only renders when `phase !== "draft"`. Layout switches to a 2-col grid (`lg:grid-cols-[minmax(0,1fr)_320px]`) with the timeline sticky (`lg:sticky lg:top-6`) on the drive editor page for published drives; draft phase keeps the historical `max-w-3xl` single-column layout.
+
+**Bugs fixed**
+- **React 19 `startTransition` wraps on DepartmentRow dispatchers.** Three `useActionState` dispatchers (save-on-blur, reorder, delete) were called from click handlers without a transition context — React 19 fires a warning ("An async function with useActionState was called outside of a transition"). RPCs still executed but `isPending` didn't update. Wrapped all three sites in `React.startTransition(...)`.
+- **Friendly duplicate-department error.** `addDriveDepartment` / `updateDriveDepartment` used to pass raw `error.message` through — the user saw the Postgres 23505 dump. Added `friendlyDepartmentError(error, name)` helper that translates 23505 into `A department named "X" already exists on this drive.` Other Postgres codes still fall through to the raw message so genuine bugs stay visible.
+- **Reorder arrow alignment.** The reorder-controls wrapper was `flex items-center gap-1` with `<span className="h-6 w-6" />` placeholders for absent buttons. Spans default to `display: inline`; the placeholders collapsed inconsistently and arrows drifted across rows. Switched to `grid grid-cols-[24px_24px] items-center gap-1` with `<div aria-hidden="true" />` placeholders — grid columns are explicit-width so the ↑ column and ↓ column stay at the same X on every row.
+- **Publish modal auto-closes on success.** The `PublishConfirmModal` in the drive editor never watched `state.ok`, so after a successful publish the modal sat there while the drive editor re-rendered behind it in the "open" phase. Added the same `wasPendingRef` `useEffect` pattern used elsewhere (Lesson 20 — `state.ok` sticks across dispatches; watch `isPending → false` transitions with a ref instead).
+- **`applicant_count` wiring in DangerZone.** The `DangerZone` prop had been hardcoded `hasApplications={false}` since 16B with a TODO comment. Wired the real count via a new field on `DriveWithQuestions`.
+- **`applicant_count` semantics switched to "live" everywhere.** Related to the above — `applicant_count` used to count all statuses including withdrawn + removed, so a single withdrawn app blocked deletion and the "1 applicant" pill on drive rows / picker was misleading (the person had explicitly pulled out). Now `applicant_count` means non-terminal statuses only (`pending / reviewing / accepted / rejected`). Both `DriveListItem` and `DriveWithQuestions` share the same semantics. Applied at three consumer sites for free (`DriveListRow`, `DrivePicker`, `DangerZone`).
+- **`delete_drive` SQL RPC follow-up** — matching SQL migration ([supabase/17c_delete_drive_live_only.sql](supabase/17c_delete_drive_live_only.sql)) so the RPC gate uses the same status filter as the UI. Otherwise UI would allow delete but the RPC would still reject. The `open` phase gate now counts only live apps; withdrawn/removed no longer hold a drive hostage. Idempotent `create or replace`, no schema changes.
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| new | [supabase/17c_delete_drive_live_only.sql](supabase/17c_delete_drive_live_only.sql) | Rewrite `delete_drive` to filter `status not in ('withdrawn','removed')` on the open-phase gate. Idempotent. |
+| new | [components/admin/drive-timeline-card.tsx](components/admin/drive-timeline-card.tsx) | 3-stage vertical timeline (Open / Review / Results) with megaphone/document/trophy icons; current stage gets filled indigo chip + "CURRENT" pill; connector rail between chips; hidden in draft phase. |
+| patch | [components/admin/draft-caution-banner.tsx](components/admin/draft-caution-banner.tsx) | Rewrote copy to a 3-bullet timeline that matches actual phase-lock reality; the outer render conditional lives on the drive-editor form (see next). |
+| patch | [components/admin/drive-editor-form.tsx](components/admin/drive-editor-form.tsx) | Banner conditional relaxed to `!isEdit \|\| phase === "draft"` so it also renders in create mode (session key falls back to `new:{clubId}`); `PublishConfirmModal` gains a `wasPendingRef` `useEffect` that closes it on success; DangerZone `hasApplications` now uses `drive!.applicant_count > 0` (was hardcoded `false`). |
+| patch | [components/admin/department-row.tsx](components/admin/department-row.tsx) | Three dispatchers (`saveIfChanged`, `ReorderButton.handleClick`, `DeleteButton.handleClick`) wrapped in `React.startTransition(...)`. Reorder controls div swapped from `flex + span placeholders` to `grid grid-cols-[24px_24px] + div placeholders`. |
+| patch | [lib/actions/drive.ts](lib/actions/drive.ts) | New `friendlyDepartmentError(error, name)` helper — translates Postgres 23505 (unique constraint) to a user-friendly sentence. Applied in `addDriveDepartment` and `updateDriveDepartment`. |
+| patch | [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | `applicant_count` on both `DriveListItem` and `DriveWithQuestions` now = live applications (excludes withdrawn/removed). `listDrivesForClub`: dropped the embedded `applications(count)` in the main select; the secondary status fetch widened from 2 statuses to 4 and now produces both `liveByDrive` + `pendingByDrive` maps from one pass. `getDriveWithQuestions`: dropped the embedded `applications(count)`; the head-only filtered count now populates `applicant_count` directly (previous `live_applicant_count` field removed as redundant). |
+| patch | [app/(admin)/admin/clubs/[slug]/recruitment/page.tsx](app/(admin)/admin/clubs/[slug]/recruitment/page.tsx) | New `GroupedDrives` sub-component + fixed `SECTION_ORDER` array (Open / Review / Draft / Results). Empty sections hidden. |
+| patch | [app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx](app/(admin)/admin/clubs/[slug]/recruitment/[driveId]/page.tsx) | Layout switches to 2-col grid for published drives (max-w-6xl + 320px sidebar); timeline card mounted in the sidebar; draft phase keeps the historical single-column max-w-3xl. |
+
+## Gate reality (banner rewrite reference)
+
+Full audit of what's actually editable per phase, done while diagnosing the misleading banner copy:
+
+| Field | Draft | Open | Review | Result |
+|---|:-:|:-:|:-:|:-:|
+| Name / description / target years / deadline / result date | ✅ | ✅ | ✅ | ❌ |
+| Interview link | ✅ | ✅ | ✅ | ❌ |
+| Community link (drive-level) | ✅ | ✅ | ✅ | ✅ (dedicated RPC) |
+| Role on accept + role label | ✅ | ✅ | ✅ | ❌ |
+| Questions — add / edit / delete / reorder | ✅ | ✅ | ❌ | ❌ |
+| Max department choices | ✅ | ❌ | ❌ | ❌ |
+| Departments — add / delete / reorder | ✅ | ❌ | ❌ | ❌ |
+| Department name + community link | ✅ | ✅ | ✅ | ✅ |
+
+Notable gaps between this reality and the pre-rewrite banner copy: question CRUD does not lock at publish (it locks at deadline / review), and drive-level name / dates / target years / interview link stay editable through review too. Tightening question CRUD to draft-only is scoped to **Step 20** (question-edit data integrity — snapshot prompts + applicant notification), which is why we chose to rewrite the banner instead of pre-emptively tightening gates without the compensating integrity work.
+
+## Deviations from spec / non-obvious choices
+
+1. **Grouping section order is Open → Review → Draft → Results** (not chronological). Rationale: admins act on Open/Review most, Draft is WIP, Results is archival — put the actionable stuff at the top of the page.
+2. **DriveTimelineCard is hidden in draft** — nothing has happened yet; the timeline would be all-future. Draft phase keeps the historical `max-w-3xl` layout for the drive editor so the form doesn't feel awkwardly narrow next to an empty sidebar slot.
+3. **`live_applicant_count` field was added, then removed** — I introduced it as a separate field alongside `applicant_count` (total) when fixing the delete gate. On a follow-up request to also fix the drive-row pill, I collapsed to a single field with live semantics. Cleaner: one field, one meaning, three consumer sites fixed for free.
+4. **Widened secondary fetch in `listDrivesForClub`** to include `accepted + rejected` so we can compute both live count and pending count from one query. Same 2-round-trip cost as before.
+5. **`friendlyDepartmentError` only translates 23505.** Deliberately narrow — other Postgres errors (e.g. auth failures, phase gate rejections) still fall through to raw `error.message` so genuine bugs remain visible.
+6. **`GroupedDrives` extracted as a sub-component in-file** rather than a new component file. Only ever used on the recruitment page; a whole file for it would be over-abstraction.
+7. **The DELETE-department renormalization smoke-test (Batch 2 spec section B.5) is unreachable through the UI** — applications only exist on published drives, and dept delete is draft-only. The `array_remove(preferred_departments, ...)` inside `delete_drive_department` is defensive-only code. Flagged in conversation; no action taken — will be documented if we ever revisit dept-delete policy.
+
+## Verification
+
+- `npx tsc --noEmit` — exit 0 after each of the ten edits.
+- IDE diagnostics had a few mid-edit false positives (unused imports before the consuming edit landed) — cleared on the immediate follow-up.
+- Grep after `applicant_count` consolidation: three consumer sites (`drive-list-row.tsx`, `drive-picker.tsx`, `drive-editor-form.tsx`) all reference the now-consistent field.
+- `startTransition` audit: no other `useActionState` dispatchers in the touched files are called from bare event handlers.
+
+## Not verified here (needs interactive smoke)
+
+- All four fixes have small user-visible surface — worth clicking through: create a new drive (banner in create mode → dismiss → refresh persists), publish an existing drive (modal auto-closes; timeline sidebar appears; drive migrates from Draft section to Open section on the list page), withdraw the only application (list-row pill drops to "0 applicants"; delete button unblocks), try to add a duplicate department name (friendly error, not raw Postgres).
+
+## What this addendum does NOT touch
+
+- No changes to 17C server layer (Batch 1) semantics — the schema, RPCs, and query shapes are all unchanged; only the `delete_drive` RPC (from 16A) was rewritten.
+- No question-edit gate tightening — that's step 20's scope.
+- No changes to the applications page or profile pages.
+
+## After this addendum
+
+Waiting on the [supabase/17c_delete_drive_live_only.sql](supabase/17c_delete_drive_live_only.sql) migration to be applied before the delete-gate fix takes full effect. Everything else lands purely from the code changes.
+
+Once smoked, roadmap continues per the main plan: **Step 18** (maintenance sweep) → **Step 19** (security) → **Step 20** (question-edit integrity — that's when the banner copy gets revisited to actually match tightened gates).
+
+---
+
+# 17C Batch 2 — Addendum 2 (Trailing polish: dept visibility + add-form reset) (Shipped)
+
+Final polish set for 17C. Three items caught during continued smoke of Batch 2 + Addendum 1: a Lesson-20 reset bug in the add-department form, department visibility on the admin members page, and department in the club-roster CSV.
+
+## Feature summary (as shipped)
+
+- **Add-department form clears after every successful add** (bug). The `useEffect` that reset name/link inputs watched `[state.ok]`. `state.ok` flips `false → true` on the first successful add and then stays sticky (Lesson 20). React skips the effect on subsequent successes because the dep didn't change, so the previous department's name + link stayed in the inputs. Switched to the `wasPendingRef` `isPending: true → false` pattern already used in `PublishConfirmModal` and elsewhere.
+- **Department pill on admin members page.** New beige pill in the member row's tag stack, right of the role pill, left of the "Locked" (exclude-from-promote) pill. Renders only when `member.accepted_department` is set — members from pre-17C drives or drives without departments get no pill. Same styling as the department pill on My Clubs / apply-review row so the treatment is consistent everywhere placement is shown.
+- **Department column in the club-roster CSV.** New "Department" header slotted between Branch and Since. Members without placement get an empty cell; admin rows always get an empty cell (admins are not accepted through drives, so the concept doesn't apply). System-wide exports (`all-members`, `all-admins`) intentionally do NOT include department per this batch's scope.
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| patch | [components/admin/departments-section.tsx](components/admin/departments-section.tsx) | `AddDepartmentForm`: destructure `isPending` from `useActionState`; add `wasPendingRef`; the reset effect now fires on the `isPending → false` edge with `state.ok && !state.error` guard. Lesson 20 comment added inline. |
+| patch | [components/admin/member-row.tsx](components/admin/member-row.tsx) | Department pill inside the existing pill row (`mt-1 flex flex-wrap items-center gap-1.5`). Guarded on `member.accepted_department`; uses `bg-beige text-ink-soft` + title tooltip "Placed in {name}". |
+| patch | [lib/queries/export.ts](lib/queries/export.ts) | `ClubRosterMemberRow` gains `department: string \| null`; `ClubRosterAdminRow` gains `department: null` (fixed literal). `getClubRoster` embeds `accepted_department:drive_departments!club_members_accepted_department_id_fkey(name)` on the members fetch. |
+| patch | [app/(admin)/admin/api/export/club-roster/route.ts](app/(admin)/admin/api/export/club-roster/route.ts) | New "Department" column inserted between "Branch" and "Since" in both the header row and each data row (`r.department ?? ""`). |
+
+## Deviations / notes
+
+1. **`department` on both union arms** rather than `department?` optional or a discriminated field. Reason: lets the CSV emitter read `r.department` directly on `ClubRosterRow` without narrowing on `r.type`. Admin arm gets `null` as a literal type so it's still statically distinguishable.
+2. **System-wide exports intentionally skipped.** `all-members` and `all-admins` (`lib/queries/export.ts` `getAllMembers` / `getAllAdmins` and their routes) were NOT touched. Explicit per this batch's scope — those exports were already tiered as system-level snapshots, not per-club rosters.
+3. **Placement in the pill stack** — department sits between role and "Locked" (not first, not last) — mirrors the reading order used on the My Clubs card and application review row.
+4. **`wasPendingRef` pattern already established** — same fix pattern was applied to `PublishConfirmModal` (Addendum 1) and referenced in Lesson 20. Not a new invention; just applying the pattern the file was missing.
+
+## Verification
+
+- `npx tsc --noEmit` — exit 0 after each edit.
+- The new pill uses only tokens already in `tailwind.config.ts` (`bg-beige`, `text-ink-soft`, `rounded-full`, etc.).
+- CSV emitter mapping length matches header length (9 columns each).
+
+## What this addendum does NOT touch
+
+- System-wide `all-members` / `all-admins` exports and their routes.
+- Any other member-page controls (edit-role modal, remove modal, bulk-promote — all untouched).
+- Any 17C server layer (Batch 1) shapes — this is purely UI + export column additions.
+
+## After this addendum
+
+17C is closed. Everything above is code-only; no additional migrations pending beyond the ones already flagged in Batch 1 + Addendum 1 (`17c_departments.sql` + `17c_delete_drive_live_only.sql`). Next step per roadmap: **Step 18** (maintenance sweep).

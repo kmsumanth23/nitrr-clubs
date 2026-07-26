@@ -80,6 +80,16 @@ function MembershipCard({ membership }: { membership: MyMembership }) {
                 <IconShieldCheck size={9} /> Web {membership.admin_tier}
               </span>
             )}
+            {/* 17C: department placement pill — visible only when the source
+                drive had departments and this member has been placed. */}
+            {membership.accepted_department && (
+              <span
+                className="rounded-full bg-beige px-2 py-0.5 text-[10px] font-medium text-ink-soft"
+                title={`Placed in ${membership.accepted_department.name}`}
+              >
+                {membership.accepted_department.name}
+              </span>
+            )}
           </div>
         </div>
         {club.category?.name && (

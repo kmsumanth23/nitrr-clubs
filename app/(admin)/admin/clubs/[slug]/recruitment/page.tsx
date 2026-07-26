@@ -2,8 +2,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { IconPlus, IconClipboardList } from "@tabler/icons-react";
 import { getEditableClub } from "@/lib/queries/admin";
-import { listDrivesForClub } from "@/lib/queries/admin-drives";
+import { listDrivesForClub, type DriveListItem } from "@/lib/queries/admin-drives";
 import { DriveListRow } from "@/components/admin/drive-list-row";
+import type { Phase } from "@/lib/phase";
+
+/** Order sections top-to-bottom. Draft after Review so admins see actionable
+ *  work (Open/Review) first, then WIP (Draft), then archival (Result). */
+const SECTION_ORDER: { phase: Phase; label: string; helper: string }[] = [
+  { phase: "open", label: "Open", helper: "Accepting applications" },
+  { phase: "review", label: "Review", helper: "Past deadline — decide here" },
+  { phase: "draft", label: "Draft", helper: "Not yet published" },
+  { phase: "result", label: "Results published", helper: "Locked" },
+];
 
 /**
  * Admin recruitment page — now a LIST of drives (16A).
@@ -61,12 +71,53 @@ export default async function AdminClubRecruitmentPage({
           </Link>
         </div>
       ) : (
-        <div className="space-y-2">
-          {drives.map((d) => (
-            <DriveListRow key={d.id} drive={d} clubSlug={slug} />
-          ))}
-        </div>
+        <GroupedDrives drives={drives} clubSlug={slug} />
       )}
+    </div>
+  );
+}
+
+/** Bucket drives by phase and render one section per non-empty bucket, in
+ *  the fixed Open → Review → Draft → Result order. Within a bucket the input
+ *  order (newest-first from `listDrivesForClub`) is preserved. */
+function GroupedDrives({
+  drives,
+  clubSlug,
+}: {
+  drives: DriveListItem[];
+  clubSlug: string;
+}) {
+  const byPhase = new Map<Phase, DriveListItem[]>();
+  for (const d of drives) {
+    const list = byPhase.get(d.phase) ?? [];
+    list.push(d);
+    byPhase.set(d.phase, list);
+  }
+
+  return (
+    <div className="space-y-8">
+      {SECTION_ORDER.map(({ phase, label, helper }) => {
+        const bucket = byPhase.get(phase) ?? [];
+        if (bucket.length === 0) return null;
+        return (
+          <section key={phase}>
+            <div className="mb-2 flex items-baseline gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-ink">
+                {label}{" "}
+                <span className="ml-0.5 font-normal text-ink-soft">
+                  ({bucket.length})
+                </span>
+              </h2>
+              <span className="text-[11px] text-ink-soft">{helper}</span>
+            </div>
+            <div className="space-y-2">
+              {bucket.map((d) => (
+                <DriveListRow key={d.id} drive={d} clubSlug={clubSlug} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

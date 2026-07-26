@@ -68,6 +68,20 @@ function readMaxDepartmentChoicesOrNull(formData: FormData): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** 17C: translate Postgres errors from add/update dept RPCs into user-friendly
+ *  strings. Only the unique-constraint case (23505 on drive_departments) is
+ *  worth translating today; other errors fall through to the raw message so
+ *  admins can still see them (they're rare and usually indicate a real bug). */
+function friendlyDepartmentError(
+  error: { code?: string; message?: string },
+  name: string,
+): string {
+  if (error.code === "23505") {
+    return `A department named "${name}" already exists on this drive.`;
+  }
+  return error.message ?? "Something went wrong.";
+}
+
 // ============================================================================
 // 1. createDrive — creates in DRAFT mode + auto-populates 3 default questions
 // ============================================================================
@@ -438,7 +452,7 @@ export async function addDriveDepartment(
   } as never);
   if (error) {
     console.error("addDriveDepartment rpc failed:", error);
-    return { error: error.message };
+    return { error: friendlyDepartmentError(error, parsed.data.name) };
   }
 
   revalidateDrive(clubSlug, parsed.data.driveId);
@@ -471,7 +485,7 @@ export async function updateDriveDepartment(
   } as never);
   if (error) {
     console.error("updateDriveDepartment rpc failed:", error);
-    return { error: error.message };
+    return { error: friendlyDepartmentError(error, parsed.data.name) };
   }
 
   revalidateDrive(clubSlug, driveId);

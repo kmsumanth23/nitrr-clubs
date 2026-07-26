@@ -10,10 +10,17 @@ import {
   saveApplicationNote,
   type ReviewResult,
 } from "@/lib/actions/admin-application";
+import { PlacementDecisionForm } from "@/components/admin/placement-decision-form";
 import type { AdminApplication } from "@/lib/queries/admin-applications";
 import type { ApplicationStatus } from "@/lib/database.types";
 import type { Phase } from "@/lib/phase";
 import type { DriveQuestion } from "@/lib/queries/admin-drives";
+
+/** 17C: minimal drive-department shape for the row's placement affordance. */
+interface RowDepartment {
+  id: string;
+  name: string;
+}
 
 const STATUS_STYLES: Record<ApplicationStatus, string> = {
   pending: "bg-beige text-ink-soft",
@@ -34,13 +41,21 @@ export function ApplicationReviewRow({
   clubSlug,
   phase,
   questions,
+  departments,
+  driveId,
 }: {
   app: AdminApplication;
   clubSlug: string;
   phase: Phase;
   questions: DriveQuestion[];
+  /** 17C: drive's departments — empty array means the drive has none, so no
+   *  placement pill or preferences section renders. */
+  departments: RowDepartment[];
+  /** 17C: needed by PlacementDecisionForm's hidden inputs for revalidation. */
+  driveId: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const hasDepartments = departments.length > 0;
 
   return (
     <li className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-white p-4">
@@ -58,12 +73,27 @@ export function ApplicationReviewRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <span
           className={`rounded-full px-2.5 py-1 text-[10px] font-medium capitalize ${STATUS_STYLES[app.status]}`}
         >
           {app.status}
         </span>
+
+        {/* 17C: placement affordance — accepted apps on drives with depts.
+            Placement is auto-defaulted on accept (via setApplicationStatus);
+            this shows current placement + Change/Assign button and the
+            "Placement needed" red badge when null. */}
+        {hasDepartments && app.status === "accepted" && (
+          <PlacementDecisionForm
+            applicationId={app.id}
+            driveId={driveId}
+            clubSlug={clubSlug}
+            departments={departments}
+            currentPlacement={app.accepted_department ?? null}
+          />
+        )}
+
         <button
           onClick={() => setOpen(true)}
           className="rounded-full border border-line px-3 py-1 text-[11px] text-ink-soft hover:border-ink/40 hover:text-ink"
@@ -78,6 +108,7 @@ export function ApplicationReviewRow({
           clubSlug={clubSlug}
           phase={phase}
           questions={questions}
+          departments={departments}
           onClose={() => setOpen(false)}
         />
       </Modal>
@@ -90,11 +121,13 @@ function ApplicationDetail({
   clubSlug,
   phase,
   questions,
+  departments,
 }: {
   app: AdminApplication;
   clubSlug: string;
   phase: Phase;
   questions: DriveQuestion[];
+  departments: RowDepartment[];
   onClose: () => void;
 }) {
   // Responses is now Record<string, string> keyed by question.id (post-16B).
@@ -103,6 +136,7 @@ function ApplicationDetail({
     app.status === "withdrawn" ||
     app.status === "removed" ||
     phase === "result";
+  const preferences = app.preferred_departments_resolved ?? [];
 
   return (
     <div className="space-y-5">
@@ -120,6 +154,25 @@ function ApplicationDetail({
           <Snap label="Branch" value={app.applicant?.branch ?? null} />
         </div>
       </div>
+
+      {/* 17C: ranked department preferences — shown when drive has depts.
+          Deleted-dept references are stripped upstream in the query mapper. */}
+      {departments.length > 0 && (
+        <div className="rounded-xl border border-line bg-cream/40 p-3">
+          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-ink-soft">
+            Department preferences
+          </div>
+          {preferences.length > 0 ? (
+            <ol className="list-decimal space-y-0.5 pl-4 text-xs text-ink">
+              {preferences.map((p) => (
+                <li key={p.id}>{p.name}</li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-xs text-ink-soft">No preferences recorded.</p>
+          )}
+        </div>
+      )}
 
       {/* Dynamic Q&A section */}
       <div className="space-y-3">

@@ -58,11 +58,21 @@ export function MemberRow({
             </span>
           )}
         </div>
-        {/* 17B: structural role pill + optional "Locked" (excluded) indicator */}
+        {/* 17B: structural role pill + optional "Locked" (excluded) indicator.
+            17C: department placement pill (visible only when the source drive
+            had departments and this member was placed in one). */}
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <span className="rounded-full bg-indigo-soft px-2 py-0.5 text-[10px] font-medium text-indigo">
             {displayRoleLabel(member.role, member.role_label)}
           </span>
+          {member.accepted_department && (
+            <span
+              className="rounded-full bg-beige px-2 py-0.5 text-[10px] font-medium text-ink-soft"
+              title={`Placed in ${member.accepted_department.name}`}
+            >
+              {member.accepted_department.name}
+            </span>
+          )}
           {member.exclude_from_promote && (
             <span
               className="rounded-full bg-cream px-2 py-0.5 text-[10px] text-ink-soft"

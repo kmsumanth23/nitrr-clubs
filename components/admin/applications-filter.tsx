@@ -7,6 +7,12 @@ import type { Phase } from "@/lib/phase";
 import type { ApplicationStatus } from "@/lib/database.types";
 import type { DriveQuestion } from "@/lib/queries/admin-drives";
 
+/** 17C: minimal shape for the placement affordance on each row. */
+interface FilterDepartment {
+  id: string;
+  name: string;
+}
+
 type Filter = "all" | ApplicationStatus;
 const FILTERS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
@@ -27,12 +33,16 @@ function FilterAndList({
   clubSlug,
   phase,
   questions,
+  departments,
+  driveId,
 }: {
   applications: AdminApplication[];
   counts: Record<Filter, number>;
   clubSlug: string;
   phase: Phase;
   questions: DriveQuestion[];
+  departments: FilterDepartment[];
+  driveId: string;
 }) {
   const [active, setActive] = React.useState<Filter>("all");
   const filtered =
@@ -76,6 +86,8 @@ function FilterAndList({
               clubSlug={clubSlug}
               phase={phase}
               questions={questions}
+              departments={departments}
+              driveId={driveId}
             />
           ))}
         </ul>
@@ -90,12 +102,18 @@ export function ApplicationsFilter({
   clubSlug,
   phase,
   questions,
+  departments,
+  driveId,
 }: {
   applications: AdminApplication[];
   counts: Record<Filter, number>;
   clubSlug: string;
   phase: Phase;
   questions: DriveQuestion[];
+  /** 17C: drive's departments — empty = no picker/placement affordance. */
+  departments: FilterDepartment[];
+  /** 17C: needed by PlacementDecisionForm to revalidate the right page. */
+  driveId: string;
 }) {
   return (
     <FilterAndList
@@ -104,6 +122,8 @@ export function ApplicationsFilter({
       clubSlug={clubSlug}
       phase={phase}
       questions={questions}
+      departments={departments}
+      driveId={driveId}
     />
   );
 }

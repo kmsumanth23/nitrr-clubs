@@ -20,6 +20,8 @@ import {
 import { useFormStatus } from "react-dom";
 import { TargetYearsPicker } from "@/components/admin/target-years-picker";
 import { QuestionBuilder } from "@/components/admin/question-builder";
+import { DraftCautionBanner } from "@/components/admin/draft-caution-banner";
+import { DepartmentsSection } from "@/components/admin/departments-section";
 import { Modal } from "@/components/ui/modal";
 import { useUnsavedChanges } from "@/lib/hooks/use-unsaved-changes";
 import { phaseLabel, PHASE_BADGE, type Phase } from "@/lib/phase";
@@ -102,6 +104,13 @@ export function DriveEditorForm({
   const [roleLabel, setRoleLabel] = React.useState<string>(
     drive?.role_label ?? "",
   );
+  // 17C: how many departments students can rank on this drive (1-6).
+  // Initial value only — MaxChoicesPicker inside DepartmentsSection writes
+  // directly into the hidden input on change (draft-only), and next form
+  // submit reads the DOM value. Setter unused on purpose.
+  const [maxDepartmentChoices] = React.useState<number>(
+    drive?.max_department_choices ?? 2,
+  );
 
   const [dirty, setDirty] = React.useState(false);
   const [publishOpen, setPublishOpen] = React.useState(false);
@@ -176,6 +185,18 @@ export function DriveEditorForm({
         </div>
       )}
 
+      {/* 17C: draft-phase caution — dismissible-per-session via sessionStorage.
+          Shown in create mode AND edit-draft mode (both are the "pre-publish"
+          window where structural changes are still allowed). Hidden once the
+          drive is published (open/review/result). Session key falls back to
+          `new:{clubId}` in create mode so dismissal persists within the
+          session for that club's new-drive page. */}
+      {(!isEdit || phase === "draft") && (
+        <DraftCautionBanner
+          driveId={isEdit && drive ? drive.id : `new:${clubId}`}
+        />
+      )}
+
       {/* 16C: backfill banner for pre-16C drives with null interview link. */}
       {showBackfillBanner && (
         <div className="flex items-start gap-2 rounded-2xl border border-clay/30 bg-clay/5 p-4 text-sm">
@@ -208,6 +229,14 @@ export function DriveEditorForm({
         ) : (
           <input type="hidden" name="clubId" value={clubId} />
         )}
+        {/* 17C: max_department_choices — MaxChoicesPicker mutates this value
+            directly in draft. Non-draft: value flows through unchanged, and
+            the RPC's coalesce-preserve leaves the column alone. */}
+        <input
+          type="hidden"
+          name="maxDepartmentChoices"
+          defaultValue={maxDepartmentChoices}
+        />
 
         {/* Section 1: The drive */}
         <div className="rounded-2xl border border-line bg-white p-5">
@@ -502,6 +531,19 @@ export function DriveEditorForm({
         </div>
       )}
 
+      {/* Section 3: Departments (17C). Top-level sibling of Sections 1 & 2 —
+          not nested in `<form id="drive-form">` because DepartmentsSection has
+          its own inner forms (add / update / delete / reorder). Lesson 7/23. */}
+      {isEdit && drive && (
+        <DepartmentsSection
+          driveId={drive.id}
+          clubSlug={clubSlug}
+          departments={drive.departments ?? []}
+          maxDepartmentChoices={drive.max_department_choices ?? 2}
+          phase={phase}
+        />
+      )}
+
       {/* Bottom action bar — primary save + publish actions side by side */}
       {!readOnly && (
         <div className="sticky bottom-4 rounded-2xl border border-line bg-white p-4 shadow-soft">
@@ -638,7 +680,7 @@ export function DriveEditorForm({
           driveName={drive!.name}
           clubSlug={clubSlug}
           phase={phase}
-          hasApplications={false /* 16B populates this from a real count */}
+          hasApplications={drive!.applicant_count > 0}
         />
       )}
     </div>
@@ -662,6 +704,19 @@ function PublishConfirmModal({
     publishDrive,
     {},
   );
+
+  // Close the modal on the isPending → false transition after a successful
+  // publish. `revalidateDrive` (inside the action) has already refreshed the
+  // page, so closing reveals the drive editor with phase now "open".
+  // Watching isPending transitions instead of state.ok because state.ok
+  // stays sticky across repeated dispatches (Lesson 20).
+  const wasPendingRef = React.useRef(false);
+  React.useEffect(() => {
+    if (wasPendingRef.current && !isPending && state.ok && !state.error) {
+      onClose();
+    }
+    wasPendingRef.current = isPending;
+  });
 
   return (
     <Modal open={open} onClose={onClose}>

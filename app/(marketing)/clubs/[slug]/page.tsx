@@ -78,9 +78,10 @@ export default async function ClubDetailPage({
   }
 
   // 16C: community link reveal only for members of THIS club.
-  // 17A follow-up: prefer the drive-specific `recruitments.community_whatsapp_link`
-  // from the viewer's most recent accepted+published application over the
-  // club-level link. Keeps this page consistent with `/profile` My clubs.
+  // 17C: 3-tier resolver — dept → drive → club — walked via a single
+  // embedded query on `club_members`, mirroring `getMyMemberships` on
+  // /profile. Replaces the 17A applications-walk (which pre-dated the
+  // `source_recruitment_id` / `accepted_department_id` back-links).
   const supabase = await createClient();
   const {
     data: { user },
@@ -90,30 +91,24 @@ export default async function ClubDetailPage({
   if (user) {
     const { data: memberRow } = await supabase
       .from("club_members")
-      .select("club_id")
+      .select(
+        `club_id,
+         source_recruitment:recruitments!club_members_source_recruitment_id_fkey(community_whatsapp_link),
+         accepted_department:drive_departments!club_members_accepted_department_id_fkey(community_whatsapp_link)`,
+      )
       .eq("club_id", club.id)
       .eq("profile_id", user.id)
       .maybeSingle();
     isMember = !!memberRow;
 
-    if (isMember) {
-      const { data: acceptedApps } = await supabase
-        .from("applications")
-        .select(
-          "recruitment:recruitments(community_whatsapp_link, results_published_at)",
-        )
-        .eq("profile_id", user.id)
-        .eq("club_id", club.id)
-        .eq("status", "accepted")
-        .order("updated_at", { ascending: false });
-      for (const raw of acceptedApps ?? []) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rec = (raw as any).recruitment;
-        if (rec?.community_whatsapp_link && rec?.results_published_at) {
-          resolvedCommunityLink = rec.community_whatsapp_link;
-          break;
-        }
-      }
+    if (memberRow) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const row = memberRow as any;
+      resolvedCommunityLink =
+        row.accepted_department?.community_whatsapp_link ?? // 17C: dept
+        row.source_recruitment?.community_whatsapp_link ?? // 17A: drive
+        club.community_whatsapp_link ?? // 16C: club
+        null;
     }
   }
 
