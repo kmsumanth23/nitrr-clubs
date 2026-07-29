@@ -26,9 +26,11 @@ export interface DriveListItem {
   department_count: number; // 17C — for list display
   created_at: string;
   phase: Phase;
-  /** Live applications (pending / reviewing / accepted / rejected). Excludes
-   *  withdrawn + removed — those are terminal and don't reflect actionable
-   *  applicants. This is what the UI shows on drive rows and pickers. */
+  /**
+   * Live application count — excludes 'withdrawn' and 'removed' statuses.
+   * Used by DangerZone delete gate, DriveListRow pill, DrivePicker badge.
+   * Tightened from "all statuses" to "live" in 17C Addendum 1.
+   */
   applicant_count: number;
   /** 16B: applications in `pending` or `reviewing` status. Used by the
    *  admin recruitment list to show "N pending" pill on Open/Review
@@ -56,9 +58,11 @@ export interface DriveWithQuestions {
   phase: Phase;
   questions: DriveQuestion[];
   departments: DriveDepartment[]; // 17C
-  /** Live applications (pending / reviewing / accepted / rejected). Excludes
-   *  withdrawn + removed. Used by the drive-editor Danger Zone to gate
-   *  "delete open drive". Matches `DriveListItem.applicant_count` semantics. */
+  /**
+   * Live application count — excludes 'withdrawn' and 'removed' statuses.
+   * Used by DangerZone delete gate, DriveListRow pill, DrivePicker badge.
+   * Tightened from "all statuses" to "live" in 17C Addendum 1.
+   */
   applicant_count: number;
 }
 

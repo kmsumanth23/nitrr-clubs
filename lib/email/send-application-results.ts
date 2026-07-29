@@ -27,9 +27,10 @@ export async function sendApplicationResultEmails(
   };
 
   // Fetch applications + applicant profile + club info in one query.
-  // Must disambiguate the profiles embed — `applications` has two FKs to
-  // `profiles` (profile_id + legacy note_by), so an auto-inferred embed
-  // fails with PGRST201. Force the applicant FK explicitly.
+  // Explicit FK on the profiles embed (`!applications_profile_id_fkey`) is
+  // kept per step 18 Q2 — the historical `note_by` FK is gone (step 18
+  // dropped the vestigial column), but pinning the FK guards against future
+  // re-introduction of ambiguity if any other profiles FK gets added.
   const { data, error } = await supabase
     .from("applications")
     .select(

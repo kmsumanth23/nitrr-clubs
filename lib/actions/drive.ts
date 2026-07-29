@@ -111,7 +111,7 @@ export async function createDrive(
   const supabase = await createClient();
   // The generated RPC types mark description/deadline/result_date as non-null
   // string, but the SQL function accepts NULL. Cast to bypass the incorrect
-  // type — same pattern used by startNewRecruitment in recruitment.ts.
+  // type. (Regenerating types would fix this too — pending step 18 sweep.)
   const { data, error } = await supabase.rpc("create_drive", {
     club_id_in: parsed.data.clubId,
     name_in: parsed.data.name,

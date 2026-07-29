@@ -59,9 +59,6 @@ export type Database = {
           club_id: string
           created_at: string
           id: string
-          note: string | null
-          note_at: string | null
-          note_by: string | null
           preferred_departments: string[] | null
           profile_id: string
           recruitment_id: string
@@ -74,9 +71,6 @@ export type Database = {
           club_id: string
           created_at?: string
           id?: string
-          note?: string | null
-          note_at?: string | null
-          note_by?: string | null
           preferred_departments?: string[] | null
           profile_id: string
           recruitment_id: string
@@ -89,9 +83,6 @@ export type Database = {
           club_id?: string
           created_at?: string
           id?: string
-          note?: string | null
-          note_at?: string | null
-          note_by?: string | null
           preferred_departments?: string[] | null
           profile_id?: string
           recruitment_id?: string
@@ -112,13 +103,6 @@ export type Database = {
             columns: ["club_id"]
             isOneToOne: false
             referencedRelation: "clubs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "applications_note_by_fkey"
-            columns: ["note_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {

@@ -5,7 +5,8 @@ import { IconX } from "@tabler/icons-react";
 
 /**
  * Chip-style input for the club's highlight bullets. Renders one hidden
- * `highlights__N` form field per chip, so the server action can collect them.
+ * `<input name="highlights">` per chip — the server action collects them
+ * via `formData.getAll("highlights")` (all same name → array in DOM order).
  * Click X to remove, type + Enter or "Add" to append.
  */
 export function HighlightsInput({ initial }: { initial: string[] }) {
@@ -25,9 +26,11 @@ export function HighlightsInput({ initial }: { initial: string[] }) {
 
   return (
     <div>
-      {/* hidden fields the action reads */}
+      {/* Hidden fields the action reads via `formData.getAll("highlights")`.
+          Each chip is a separate input with the same name; DOM order = array
+          order on the server. */}
       {items.map((h, i) => (
-        <input key={i} type="hidden" name={`highlights__${i}`} value={h} />
+        <input key={i} type="hidden" name="highlights" value={h} />
       ))}
 
       <div className="mb-2 flex flex-wrap gap-2">

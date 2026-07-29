@@ -111,66 +111,6 @@ export async function getApplicationCountsForClub(
   return counts as Record<ApplicationStatus | "all", number>;
 }
 
-export interface RecruitmentHistoryGroup {
-  recruitment: RecruitmentForAdmin;
-  applications: AdminApplication[];
-  counts: Record<ApplicationStatus | "all", number>;
-}
-
-/**
- * Applications history for a club, grouped by PRIOR recruitments
- * (everything except the most recent). Newest-first order.
- */
-export async function getApplicationHistoryForClub(
-  clubId: string,
-): Promise<RecruitmentHistoryGroup[]> {
-  const supabase = await createClient();
-
-  const { data: recs, error: recErr } = await supabase
-    .from("recruitments")
-    .select("id, name, deadline, result_date, results_published_at, created_at")
-    .eq("club_id", clubId)
-    .not("published_at", "is", null) // 16A: exclude drafts (never shown in history)
-    .order("created_at", { ascending: false });
-  if (recErr) throw recErr;
-  if (!recs || recs.length < 2) return []; // need at least 2 to have history
-
-  const priorRecs = recs.slice(1) as RecruitmentForAdmin[]; // skip the current one
-  const priorIds = priorRecs.map((r) => r.id);
-
-  const { data: allApps, error: appErr } = await supabase
-    .from("applications")
-    .select(
-      `*,
-       applicant:profiles!applications_profile_id_fkey(id, full_name, email, roll_number, year, branch)`,
-    )
-    .in("recruitment_id", priorIds)
-    .order("created_at", { ascending: false });
-  if (appErr) throw appErr;
-
-  const byRec = new Map<string, AdminApplication[]>();
-  for (const id of priorIds) byRec.set(id, []);
-  for (const a of (allApps ?? []) as AdminApplication[]) {
-    const list = byRec.get(a.recruitment_id as unknown as string);
-    if (list) list.push(a);
-  }
-
-  return priorRecs.map((rec) => {
-    const apps = byRec.get(rec.id) ?? [];
-    const counts: Record<string, number> = {
-      all: apps.length,
-      pending: 0, reviewing: 0, accepted: 0,
-      rejected: 0, withdrawn: 0, removed: 0,
-    };
-    for (const a of apps) counts[a.status] = (counts[a.status] ?? 0) + 1;
-    return {
-      recruitment: rec,
-      applications: apps,
-      counts: counts as Record<ApplicationStatus | "all", number>,
-    };
-  });
-}
-
 // =========================================================================
 // 16B — Per-drive applications fetch
 // =========================================================================

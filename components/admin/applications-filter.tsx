@@ -127,11 +127,3 @@ export function ApplicationsFilter({
     />
   );
 }
-
-// 16B: `ApplicationsTabsView` + `HistoryGroup` removed. The pre-16B "history"
-// concept ("prior recruitments") is subsumed by 16B's drive picker on the
-// admin apps page — each drive is independent, past + present + draft are
-// all navigable via the picker. `getApplicationHistoryForClub` in
-// `lib/queries/admin-applications.ts` is dead code from here; leaving it for
-// a future maintenance sweep (matches how updateRecruitment /
-// startNewRecruitment are handled post-16A).

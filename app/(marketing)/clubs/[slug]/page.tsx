@@ -78,10 +78,14 @@ export default async function ClubDetailPage({
   }
 
   // 16C: community link reveal only for members of THIS club.
-  // 17C: 3-tier resolver — dept → drive → club — walked via a single
-  // embedded query on `club_members`, mirroring `getMyMemberships` on
-  // /profile. Replaces the 17A applications-walk (which pre-dated the
-  // `source_recruitment_id` / `accepted_department_id` back-links).
+  //
+  // Community link resolution chain (17A → 17B → 17C):
+  //   1. dept.community_whatsapp_link (17C — department-specific)
+  //   2. drive.community_whatsapp_link (17A — drive-scoped)
+  //   3. club.community_whatsapp_link (16C — club-level fallback)
+  // Live resolution at query time (not snapshotted). Admin edits at any
+  // level are immediately visible to members. Same chain implemented in
+  // `getMyMemberships` (lib/queries/profile.ts) for the /profile page.
   const supabase = await createClient();
   const {
     data: { user },

@@ -505,7 +505,14 @@ begin
       using errcode = '22023';
   end if;
 
-  -- Q2 modified B: renormalize preferred_departments — strip UUID from arrays
+  -- Q2 modified B: renormalize preferred_departments — strip UUID from arrays.
+  --
+  -- Step 18 note (E1): this block is currently UNREACHABLE via the UI. Dept
+  -- delete is draft-only per Q5-C, and applications only exist post-publish
+  -- (enforced by `enforce_application_phase` trigger). Kept as a safety net
+  -- in case dept-delete policy is ever relaxed to open/review phases, or
+  -- for manual/direct-SQL edits. See 17C Addendum 1 deviation 7 for the
+  -- reasoning trail.
   update applications
      set preferred_departments = array_remove(preferred_departments, department_id_in)
    where recruitment_id = the_recruitment_id

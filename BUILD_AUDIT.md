@@ -2259,3 +2259,139 @@ Final polish set for 17C. Three items caught during continued smoke of Batch 2 +
 ## After this addendum
 
 17C is closed. Everything above is code-only; no additional migrations pending beyond the ones already flagged in Batch 1 + Addendum 1 (`17c_departments.sql` + `17c_delete_drive_live_only.sql`). Next step per roadmap: **Step 18** (maintenance sweep).
+
+---
+
+# Step 18 — Post-17 Maintenance Sweep (Shipped)
+
+Two-batch cleanup step. Batch 1: TypeScript dead code + documentation. Batch 2: SQL vestigial-column drops + defensive-code annotation. Each candidate was grep-verified against `lib/`, `app/`, `components/` before removal — no assumptions from memory (Lesson 24). Zero live consumers surfaced. TypeCheck clean at each checkpoint. All planned work landed; three bonus orphans discovered and swept alongside the plan.
+
+Spec source: `SETUP_STEP18.md` (delivered in-conversation, not filed).
+
+## Feature summary (as shipped)
+
+**Batch 1 — TypeScript dead code + docs**
+- **A1**: Removed `updateRecruitment` server action + its inline `recruitmentUpdateSchema` from [lib/actions/club.ts](lib/actions/club.ts). Dead since 16A Batch 3b (replaced by `update_drive` RPC + drive editor).
+- **A2**: **Deleted entire file** [lib/actions/recruitment.ts](lib/actions/recruitment.ts) — the only exports (`startNewRecruitment` + `RecruitmentResult` type) were both dead. Also deleted [lib/validation/recruitment.ts](lib/validation/recruitment.ts) — its only consumer was `startNewRecruitment`. Two-file file-level deletion.
+- **A3**: Removed `getApplicationHistoryForClub` function + `RecruitmentHistoryGroup` interface from [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts). Dead since 16B Batch 2b (replaced by drive-scoped applications page).
+- **A4**: Removed `getMyProfileClubs` function + `MyProfileClub` interface from [lib/queries/profile.ts](lib/queries/profile.ts). Dead since 17A (14f unification was reverted to members-only via `getMyMemberships`).
+- **Bonus orphans**: `updateClub` back-compat shim in `club.ts` (zero consumers per grep), plus `newRecruitmentSchema` / `NewRecruitmentInput` / `RecruitmentResult` (all fell out of scope once A1/A2 landed).
+- **D1**: `applicant_count` JSDoc on both `DriveListItem` and `DriveWithQuestions` in [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) — explicit "live count, excludes withdrawn+removed, tightened in 17C Addendum 1" phrasing per spec.
+- **D2**: Community link resolution chain comments — cross-referenced pair added to [lib/queries/profile.ts](lib/queries/profile.ts) `getMyMemberships` resolver block and [app/(marketing)/clubs/\[slug\]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx). Both cite the 17A→17B→17C tier progression and point to each other so future edits stay in sync.
+- **Stale comment cleanup**: trailing dead-code comment block in [components/admin/applications-filter.tsx](components/admin/applications-filter.tsx) (lines 131-137) that explicitly said "leaving it for a future maintenance sweep" — this sweep. Removed. Also updated the comment in [lib/actions/drive.ts](lib/actions/drive.ts) line ~114 that had a stale reference to `startNewRecruitment in recruitment.ts` (file no longer exists).
+
+**Batch 2 — SQL column drops + defensive-code annotation**
+- **New migration** [supabase/18_sweep_note_columns.sql](supabase/18_sweep_note_columns.sql) — 3-step idempotent drop: FK constraint `applications_note_by_fkey` first, then columns `applications.note` / `note_by` / `note_at`. All `if exists` guarded. Post-migration sanity checks bundled as commented-out SQL at the bottom.
+- **E1 comment** in [supabase/17c_departments.sql](supabase/17c_departments.sql) — above the `array_remove` block in `delete_drive_department`. Documents the block as UNREACHABLE-defensive per 17C Addendum 1 deviation 7 (dept delete is draft-only per Q5-C; applications only exist post-publish; the two intersect nowhere via the UI).
+- **Stale comment update** in [lib/email/send-application-results.ts](lib/email/send-application-results.ts) line 31 — previously referenced "legacy note_by" as if it still existed. Rewritten to reflect step 18 Q2: `note_by` is gone, but the explicit `!applications_profile_id_fkey` on the profiles embed is retained deliberately as a guard against future FK ambiguity.
+
+## Files created / patched / deleted
+
+| Action | File | Change |
+|---|---|---|
+| new | [supabase/18_sweep_note_columns.sql](supabase/18_sweep_note_columns.sql) | 3-step idempotent migration: drop FK, drop 3 columns. Sanity check queries commented at the bottom. |
+| patch | [supabase/17c_departments.sql](supabase/17c_departments.sql) | E1 comment above `array_remove` in `delete_drive_department` — marks the block as unreachable-defensive with references to 17C Addendum 1 deviation 7. |
+| patch | [lib/actions/club.ts](lib/actions/club.ts) | Removed `updateRecruitment` (~90 lines) + `recruitmentUpdateSchema` + `updateClub` back-compat shim. `updateClubContent` + `nullable` helper preserved. |
+| **deleted** | [lib/actions/recruitment.ts](lib/actions/recruitment.ts) | Whole file removed — only exports (`startNewRecruitment`, `RecruitmentResult`) were dead. Zero incoming file imports. |
+| **deleted** | [lib/validation/recruitment.ts](lib/validation/recruitment.ts) | Whole file removed — only consumer was `startNewRecruitment`. |
+| patch | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | Removed `RecruitmentHistoryGroup` interface + `getApplicationHistoryForClub` function (~65 lines). Live exports (`getApplicationsForDrive`, `getApplicationsForClub`, `getApplicationCountsForClub`) preserved. |
+| patch | [lib/queries/profile.ts](lib/queries/profile.ts) | Removed `MyProfileClub` interface + `getMyProfileClubs` function (~95 lines). Added D2 resolver-chain comment block. Live exports (`getMyMemberships`, `getMyApplications`, `getMyProfile`, `partitionApplications`, `MyMembership`, `MyApplication`) preserved. `Category` import still live. |
+| patch | [lib/queries/admin-drives.ts](lib/queries/admin-drives.ts) | D1 JSDoc on `applicant_count` field in both `DriveListItem` and `DriveWithQuestions` — aligned to spec text (mentions all 3 consumers by name + cites 17C Addendum 1 as the tightening point). |
+| patch | [app/(marketing)/clubs/\[slug\]/page.tsx](app/(marketing)/clubs/[slug]/page.tsx) | D2 resolver-chain comment above the `resolvedCommunityLink` calculation. Cross-references `getMyMemberships` for the sibling implementation. |
+| patch | [components/admin/applications-filter.tsx](components/admin/applications-filter.tsx) | Removed trailing dead-code comment block (lines 131-137). File is now clean — no orphan branches or unused props. |
+| patch | [lib/actions/drive.ts](lib/actions/drive.ts) | Comment on `create_drive` RPC call updated — removed the now-stale reference to `startNewRecruitment in recruitment.ts` (file no longer exists), replaced with a note pointing at the step 18 sweep. |
+| patch | [lib/email/send-application-results.ts](lib/email/send-application-results.ts) | Line-31 comment updated — historical `note_by` FK is documented as gone (step 18), explicit `!applications_profile_id_fkey` retention rationale attributed to guide Q2. |
+
+## Applications-filter investigation (per guide)
+
+Guide called out `applications-filter.tsx` for a deeper investigation because it was a suspected orphan hotspot. Findings after full read:
+
+- **No dead branches** — every filter status maps to a real `ApplicationStatus`.
+- **No unused props** — every prop threads cleanly through `FilterAndList` down to `ApplicationReviewRow`.
+- **No unreachable conditional renders**.
+- **Trivial finding**: trailing comment block (lines 131-137) explicitly said "leaving it for a future maintenance sweep" and referenced `updateRecruitment` + `startNewRecruitment` by name. Deleted alongside A1/A2.
+- **Deferred**: `ApplicationsFilter` is a no-op wrapper around `FilterAndList` (same props, no transformation). Redundant but not orphan. Per guide's "if in doubt, defer" — not a sweep-scope change. Ping if a refactor is wanted separately.
+
+## Grep evidence
+
+Every candidate was greppped against `lib/ app/ components/` with `--include="*.ts" --include="*.tsx"` before removal:
+
+| Symbol | Pre-removal hits | Interpretation |
+|---|---|---|
+| `updateRecruitment` | 2 | 1 definition + 1 stale comment. Zero live consumers. |
+| `startNewRecruitment` | 3 | 1 definition + 2 stale comments (drive.ts + applications-filter.tsx). Zero live consumers. |
+| `from "@/lib/actions/recruitment"` | 0 | Confirmed safe to file-delete. |
+| `getApplicationHistoryForClub` | 2 | Definition + stale comment. Zero live consumers. |
+| `RecruitmentHistoryGroup` | 2 | Definition + self-reference in the function's return type. Zero external. |
+| `getMyProfileClubs` | 1 | Only definition. |
+| `MyProfileClub` | 3 | Definition + type reference + internal use. Zero external. |
+| `updateClub` (excluding `updateClubContent`) | 1 | Only the shim itself. Zero external. |
+| `newRecruitmentSchema` / `NewRecruitmentInput` / `RecruitmentResult` | 2-3 each | Only self / one internal consumer (`startNewRecruitment`). Zero external. |
+
+Post-cleanup grep for all 9 removed symbols returned **zero hits** across all three source trees.
+
+## Batch 2 pre-flight + post-migration verification
+
+- **Pre-flight query** (`SELECT count(*) FILTER ... FROM applications`) — user reported **0 rows** for `with_note`, `with_note_by`, `with_note_at`. No backfill needed.
+- **Post-migration verification** — user ran the commented sanity checks at the bottom of `18_sweep_note_columns.sql`:
+  - `SELECT column_name FROM information_schema.columns WHERE table_name = 'applications' AND column_name IN ('note', 'note_by', 'note_at')` → **0 rows**.
+  - `SELECT constraint_name FROM information_schema.table_constraints WHERE table_name = 'applications' AND constraint_name = 'applications_note_by_fkey'` → **0 rows**.
+- **Application flow smoke test** — user loaded `/admin/clubs/<slug>/applications` for a drive with applications and saved a new note (routes to `application_notes` via the append-only path); zero errors.
+- **Post-drop grep** for `note_by` / `note_at` — only 1 hit: my own comment in `send-application-results.ts` describing the drop history. Zero live references.
+- **`.note` field access grep** — zero hits.
+- **`database.types.ts` post-regen** — file now shows zero references to `note`, `note_by`, `note_at`, or `applications_note_by_fkey`. Types match schema truth.
+
+## Type regeneration
+
+Regenerated `lib/database.types.ts` post-migration (user ran the supabase gen). Confirmed clean: no `note*` columns in `applications.Row/Insert/Update`, no `applications_note_by_fkey` in `Relationships`. TS types now match live schema.
+
+## Typecheck
+
+`npx tsc --noEmit` — **exit 0** at every checkpoint:
+- After each Batch 1 removal
+- After D1/D2 doc additions
+- After Batch 2 comment updates
+- After the SQL migration + type regen
+
+Zero warnings, zero errors across all four passes.
+
+## Deviations from spec
+
+1. **Bonus cleanups swept alongside the plan.** `updateClub` shim, `newRecruitmentSchema`, `NewRecruitmentInput`, `RecruitmentResult` — all discovered via A1/A2 grep, all confirmed zero-consumer, all removed. Spec's "unplanned orphans discovered" reporting slot covered them.
+2. **`lib/validation/recruitment.ts` deleted as a whole file** rather than edited — its sole export (`newRecruitmentSchema`) had only one consumer (`startNewRecruitment`), which A2 removed. Empty file would have been a lint violation on its own.
+3. **Type regen not run between Batch 1 and Batch 2.** Batch 1 removals were pure TS — the schema was untouched, so regen was a no-op. Ran regen once after Batch 2's actual schema drops. Matches spec's "regenerate when convenient" spirit.
+4. **`ApplicationsFilter` no-op wrapper deferred**, not removed. Per guide's "if in doubt, defer" rule; a refactor is not sweep scope.
+5. **`E1` comment placed inline in `17c_departments.sql`** rather than in a separate documentation-only file. Cleaner file history; matches spec's default preference (spec allowed either).
+
+## Verification
+
+- 9 files edited, 2 files deleted, 1 file created (SQL migration).
+- Every deletion had a prior grep with zero live consumers.
+- All post-cleanup greps returned zero hits.
+- Typecheck exit 0 throughout.
+- SQL migration applied cleanly; user confirmed post-drop sanity queries returned 0 rows for both column-existence and FK-existence checks.
+- Application flow smoke test passed (note-save via `application_notes` still works).
+
+## Not verified here (needs broader smoke)
+
+- Full app regression across every touched surface — recommended smoke tests below.
+- Sysadmin export routes (`all-members`, `all-admins`) — untouched by this sweep but worth clicking through since the underlying queries share the profile/club shapes.
+- Long-tail admin routes — untouched but worth a click-through to confirm no stale imports.
+
+## What Step 18 did NOT touch
+
+- `clubs.is_recruiting` column — deferred to **step 25** (dedicated step, ~10 file consumers to sweep).
+- Any RLS policy audit — out of scope.
+- Any RPC signature changes — out of scope.
+- Question-edit data integrity gates — **step 20** territory.
+- 17C server-layer semantics — untouched.
+- `delete_drive_department` `array_remove` block — kept as defensive code per E1 comment; not removed.
+- `ApplicationsFilter` wrapper — deferred (see deviation 4).
+
+## After this step
+
+Step 18 closes. Roadmap continues:
+- **Step 19** — Post-deploy P0/P1 security (safeNext protocol-relative URL bypass, year-impersonation defense, signout GET → POST for CSRF).
+- **Step 20** — Question-edit data integrity + applicant notification (snapshot prompts, notify on edit).
+
+Both step 19 and step 20 are focused small-scope steps. Step 18 landing clean sets the foundation.
