@@ -118,6 +118,28 @@ export function formatAuditEntry(entry: AuditEntry): {
       };
     }
 
+    // 19b — Year override
+    case "admin_set_profile_year": {
+      const oldYear = (details.old_year as number | null) ?? null;
+      const newYear = (details.new_year as number | null) ?? null;
+      const targetName = (details.target_name as string) ?? target ?? "a user";
+      return {
+        label: "Year overridden",
+        sentence: (
+          <>
+            <strong>{actor}</strong> overrode{" "}
+            <strong>{targetName}</strong>&apos;s year
+            {oldYear != null && newYear != null ? (
+              <>
+                {" "}
+                from <em>Year {oldYear}</em> to <em>Year {newYear}</em>
+              </>
+            ) : null}
+          </>
+        ),
+      };
+    }
+
     case "publish_results": {
       const added = (details.members_added as number) ?? 0;
       const recName = (details.recruitment_name as string) ?? "a recruitment";

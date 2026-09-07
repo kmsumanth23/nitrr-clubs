@@ -9,6 +9,7 @@ import {
   isAllowedEmail,
   ALLOWED_DOMAINS_HINT,
 } from "@/lib/auth/policy";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 const credsSchema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -24,12 +25,6 @@ export type AuthResult = {
   /** Generic ok flag used by resendVerification. */
   ok?: boolean;
 };
-
-/** Safe internal redirect target (must be a same-site path). */
-function safeNext(formData: FormData): string {
-  const next = (formData.get("next") as string) || "/";
-  return next.startsWith("/") ? next : "/";
-}
 
 /** Email + password sign in. */
 export async function signInWithPassword(
@@ -56,7 +51,7 @@ export async function signInWithPassword(
   });
   if (error) return { error: error.message };
 
-  const next = safeNext(formData);
+  const next = safeNextPath(formData.get("next") as string | null);
   redirect(`/profile/complete?next=${encodeURIComponent(next)}`);
 }
 
@@ -85,7 +80,7 @@ export async function signUp(
   }
 
   const supabase = await createClient();
-  const next = safeNext(formData);
+  const next = safeNextPath(formData.get("next") as string | null);
   const origin = (await headers()).get("origin") ?? "http://localhost:3000";
 
   // The URL Supabase will include in the verification email as
@@ -121,8 +116,7 @@ export async function signUp(
 export async function signInWithGoogle(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const origin = (await headers()).get("origin") ?? "http://localhost:3000";
-  const next = (formData.get("next") as string) || "/";
-  const safe = next.startsWith("/") ? next : "/";
+  const safe = safeNextPath(formData.get("next") as string | null);
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",

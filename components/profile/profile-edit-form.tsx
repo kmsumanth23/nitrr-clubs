@@ -3,26 +3,55 @@
 import * as React from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { updateProfile, type ProfileResult } from "@/lib/actions/profile";
 import { BRANCHES } from "@/lib/validation/profile";
 import type { Profile } from "@/lib/database.types";
 
 /**
+ * 19b: `year_changes_remaining` is on the `profiles` table via the 19b
+ * migration. Declared as an optional local override so this component
+ * type-checks against both pre- and post-regen `Profile` types. Once the
+ * user regenerates types after applying 19b, the field will exist on the
+ * base type and this augmentation becomes a harmless narrowing.
+ */
+type ProfileWithChances = Profile & {
+  year_changes_remaining?: number | null;
+};
+
+/**
  * Profile view with inline-toggle edit. View mode = read-only summary;
  * Edit mode = same fields as /profile/complete. On success, flips back to
  * view (the action returns { ok: true } when no `next` param is sent).
  */
-export function ProfileEditForm({ profile }: { profile: Profile }) {
+export function ProfileEditForm({ profile }: { profile: ProfileWithChances }) {
+  const chancesRemaining = profile.year_changes_remaining ?? null;
   const [editing, setEditing] = React.useState(false);
-  const [state, formAction] = useActionState<ProfileResult, FormData>(
+  const [state, formAction, isPending] = useActionState<ProfileResult, FormData>(
     updateProfile,
     {},
   );
+  const router = useRouter();
 
+  // Lesson 20: `state.ok` is sticky across successive successful saves, so a
+  // `[state.ok]` dep only fires on the first save — subsequent saves would
+  // leave the form open. Watch the isPending → false transition instead so
+  // this runs after every completed save.
+  //
+  // router.refresh() forces the server component parent (`/profile` page) to
+  // re-fetch and re-render with the fresh `profile` prop. Without it, the
+  // read-only view + edit-form defaultValues stay frozen at the pre-first-
+  // save value even after a successful save — user only sees the correct
+  // year after a full browser refresh.
+  const wasPendingRef = React.useRef(false);
   React.useEffect(() => {
-    if (state.ok) setEditing(false);
-  }, [state.ok]);
+    if (wasPendingRef.current && !isPending && state.ok && !state.error) {
+      setEditing(false);
+      router.refresh();
+    }
+    wasPendingRef.current = isPending;
+  });
 
   if (!editing) {
     return (
@@ -97,6 +126,17 @@ export function ProfileEditForm({ profile }: { profile: Profile }) {
               </option>
             ))}
           </select>
+          {/* 19b: soft-cap hint. Only shows once the user has an active
+              year (not first-time signup completion). If they've hit 0
+              chances, the DB trigger will error at save with a friendly
+              message telling them to contact a coordinator. */}
+          {chancesRemaining !== null && profile.year != null && (
+            <p className="mt-1.5 text-[11px] text-ink-soft">
+              {chancesRemaining > 0
+                ? `${chancesRemaining} of 3 year changes remaining.`
+                : "No self-service year changes left — contact a coordinator to update it."}
+            </p>
+          )}
         </div>
         <div>
           <label className="mb-1.5 block text-sm font-medium text-ink">

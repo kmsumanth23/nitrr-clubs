@@ -32,7 +32,10 @@ const DRIVE_ACTIONS = new Set([
   "publish_drive",
   "delete_drive",
 ]);
-const SUPER_ADMIN_ACTIONS = new Set(["set_super_admin"]);
+const SUPER_ADMIN_ACTIONS = new Set([
+  "set_super_admin",
+  "admin_set_profile_year", // 19b — sysadmin year override
+]);
 const MEMBER_ACTIONS = new Set([
   "publish_results",
   "remove_member",

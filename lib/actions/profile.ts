@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { sendWelcomeEmail } from "@/lib/email/send-welcome";
 import { completeProfileSchema } from "@/lib/validation/profile";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 export type ProfileResult = { error?: string; ok?: boolean };
 
@@ -79,8 +80,15 @@ export async function completeProfile(
 
   revalidatePath("/profile");
 
-  const next = formData.get("next") as string | null;
-  if (next && next.startsWith("/")) redirect(next);
+  // 19: safeNextPath rejects protocol-relative + scheme URLs. Only redirect
+  // when the caller actually provided a target — bare fallback "/" cases
+  // continue to return { ok: true } so the inline-edit form flow doesn't
+  // navigate away unexpectedly.
+  const rawNext = formData.get("next") as string | null;
+  if (rawNext) {
+    const safeNext = safeNextPath(rawNext);
+    if (safeNext !== "/") redirect(safeNext);
+  }
   return { ok: true };
 }
 

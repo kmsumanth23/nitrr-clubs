@@ -2395,3 +2395,134 @@ Step 18 closes. Roadmap continues:
 - **Step 20** — Question-edit data integrity + applicant notification (snapshot prompts, notify on edit).
 
 Both step 19 and step 20 are focused small-scope steps. Step 18 landing clean sets the foundation.
+
+---
+
+# Step 19 — Post-deploy P0/P1 Security Hardening (Shipped, pending SQL apply)
+
+Single-batch security-critical step. Four in-scope items landed clean:
+1. **`safeNextPath()` helper** — hardened redirect target validator, replaces bare `startsWith("/")` checks throughout the auth flow (five sites hardened).
+2. **Year-impersonation defense** — `applicant_year` snapshot column on `applications` + tamper-proof INSERT trigger + admin-side mismatch pill on the review UI.
+3. **6-month year freeze** — `profiles.year_updated_at` column + rate-limit trigger with sysadmin bypass; first-time year setting unconditionally allowed.
+4. **Signout GET → POST + CSRF hardening** — new `POST /auth/signout` with Origin/Referer check; confirmation modal via new `<SignoutButton>` component; old GET signout removed (405 Method Not Allowed now).
+
+Spec source: `SETUP_STEP19.md` (delivered in-conversation, not filed).
+
+## Feature summary (as shipped)
+
+**safeNextPath hardening** — [lib/auth/safe-next.ts](lib/auth/safe-next.ts) (new)
+- Rejects: null/undefined, protocol-relative `//evil.com`, backslash-flip `/\evil.com`, scheme URLs (`http://`, `javascript:`, `data:`, etc.), anything not starting with `/`.
+- Returns `/` as safe fallback for all rejected input.
+- Applied at 5 call sites: 3 in `lib/actions/auth.ts` (`signInWithPassword`, `signUp`, `signInWithGoogle`), 1 in `lib/actions/profile.ts` (`completeProfile`), 1 in `app/auth/callback/route.ts`, plus 1 discovered late in `app/(student)/profile/complete/page.tsx` (server component with its own bare check).
+
+**applicant_year snapshot** — SQL trigger + query pass-through
+- New `applications.applicant_year int null` column with `check between 1 and 4`.
+- `snapshot_applicant_year_trigger` (BEFORE INSERT, SECURITY DEFINER) reads `profiles.year` at INSERT time and overwrites any client-provided value. Tamper-proof by construction — even a direct RPC caller can't fake the value.
+- Backfill sets existing rows from current `profile.year`. Documented as "migration snapshot, not apply-time snapshot" — pre-19 rows show identical values as the current year, so the mismatch pill stays silent on legacy data.
+- `AdminApplication` interface extended with `applicant_year: number | null`. Both queries use `select("*")`, so the field flows through implicitly once the column exists. Consumer-side `!= null` guard handles both pre-migration (undefined) and post-migration (real value) cases.
+
+**Year freeze** — SQL trigger, no UI changes
+- New `profiles.year_updated_at timestamptz null` column.
+- Backfill sets to `coalesce(created_at, now() - interval '1 year')` — every existing user can update immediately (their signup is >6 months old anyway).
+- `enforce_year_freeze_trigger` (BEFORE UPDATE, WHEN `new.year is distinct from old.year`) — three branches:
+  - **Sysadmin**: unconditional bypass, stamps new `year_updated_at`.
+  - **First-time set** (`old.year is null`): allowed, stamps.
+  - **Regular user, prior year exists**: allowed only if `old.year_updated_at > now() - interval '6 months'`, otherwise `raise exception with errcode 42501` and a friendly message including the unlock date.
+
+**Signout POST + CSRF** — route rewrite + new client component
+- `app/auth/signout/route.ts` rewritten: old `export async function GET` gone, replaced by `POST` with Origin header check.
+- Origin check: `new URL(originHeader).host === requestHost`. Fallback to Referer if Origin missing (old clients, curl). Reject with 403 if both missing.
+- Success returns 303 See Other (proper POST-redirect-GET status).
+- New `components/layout/signout-button.tsx` — client component with `<Modal>` confirmation and hidden `<form action="/auth/signout" method="POST">`. Browser attaches Origin automatically, so no CSRF token infrastructure needed.
+- Navbar swap: old `<a href="/auth/signout">` anchor replaced with `<SignoutButton onCloseMenu={() => setMenuOpen(false)} />`. `IconLogout` import dropped from navbar (it's now owned by the SignoutButton).
+
+**Admin review mismatch indicator** — `application-review-row.tsx`
+- Two display sites got the pill: the row header (where roll/year/branch inline) and the modal detail block (below the applicant snapshot grid).
+- Row-level pill: `⚠ Applied as Year N` in clay soft, with a title tooltip explaining both years.
+- Modal-level indicator: full sentence banner ("Applied as Year N. Current profile year is Year M.") — surfaced inline so reviewers don't have to scroll back to the row after opening the modal.
+- Both guarded on `applicant_year != null && applicant.year != null && applicant_year !== applicant.year` — pre-19 rows and rows where the values genuinely match render nothing.
+
+## Files created / patched
+
+| Action | File | Change |
+|---|---|---|
+| new | [supabase/19_security_hardening.sql](supabase/19_security_hardening.sql) | 2 columns + 2 backfills + 2 triggers with grants. Idempotent. Sanity checks bundled as commented SQL at the bottom. |
+| new | [lib/auth/safe-next.ts](lib/auth/safe-next.ts) | `safeNextPath(next)` helper with 5 defensive checks. Documented consumers in the module doc block. |
+| new | [components/layout/signout-button.tsx](components/layout/signout-button.tsx) | `SignoutButton` client component: button + confirmation Modal + hidden form POST. Accepts `onCloseMenu` callback so navbar menu can close on click. |
+| patch | [lib/actions/auth.ts](lib/actions/auth.ts) | Import `safeNextPath`; removed the local `safeNext(formData)` helper (5-line function); rewired 3 call sites (`signInWithPassword`, `signUp`, `signInWithGoogle`) to use the shared helper. |
+| patch | [lib/actions/profile.ts](lib/actions/profile.ts) | Import `safeNextPath`; replaced the bare `next.startsWith("/")` inline check in `completeProfile` with `safeNextPath` + preservation of the "no next → return ok, don't redirect" semantic. |
+| patch | [app/auth/callback/route.ts](app/auth/callback/route.ts) | Import `safeNextPath`; sanitize `searchParams.get("next")` before the `${origin}${next}` concatenation. Prevents callback-based open redirects post-auth. |
+| patch | [app/(student)/profile/complete/page.tsx](app/(student)/profile/complete/page.tsx) | **Discovered late** during the grep sweep — server component with a bare `startsWith("/")` check on the `next` searchParam. Patched to use `safeNextPath` with `/profile` fallback (preserves the "profile already complete → skip to profile if no valid next" semantic). |
+| patch | [app/auth/signout/route.ts](app/auth/signout/route.ts) | Full rewrite: GET removed, POST added with Origin/Referer check and 303 redirect. |
+| patch | [components/layout/navbar.tsx](components/layout/navbar.tsx) | Import `SignoutButton`; drop `IconLogout` from tabler imports (now owned by SignoutButton); replace the `<a href="/auth/signout">` anchor with `<SignoutButton>`. |
+| patch | [lib/queries/admin-applications.ts](lib/queries/admin-applications.ts) | Extended `AdminApplication` interface with `applicant_year: number \| null` (explicit declaration so the type is correct even before `database.types.ts` regen). Queries unchanged — they use `select("*")` so the field flows through implicitly once the column exists. |
+| patch | [components/admin/application-review-row.tsx](components/admin/application-review-row.tsx) | Row header meta line refactored to a flex-wrap container so the mismatch pill can sit inline. Modal detail block gets a second mismatch banner below the Snap grid. |
+
+## Grep verifications
+
+- **`safeNextPath` call sites**: 6 hits across 5 files (helper + 5 consumers). All auth-flow `next` handling now routes through the helper.
+- **Bare `next.startsWith("/")` remaining outside the helper**: zero hits.
+- **Old `safeNext` helper**: zero hits (removed cleanly).
+- **Signout route methods exported**: only `POST` — no `GET`. GET requests will return 405 Method Not Allowed automatically.
+- **Navbar signout wiring**: `<SignoutButton>` in place, `href="/auth/signout"` anchor gone.
+
+## Deviations from spec
+
+1. **`profile/complete/page.tsx` was NOT in the spec's 10-file list.** Discovered during the grep verification sweep (`next.startsWith("/")` check on the page). Patched inline. This raises the total files touched to 11 (spec claimed 10). Documented separately in the files table.
+2. **`AdminApplication.applicant_year` declared explicitly on the interface** rather than relying on the eventual `database.types.ts` regen. Reason: keeps the code correct before the migration ships, and stays valid after regen (base type will also have the field but the override is harmless).
+3. **Query mappers NOT updated with `applicant_year: a.applicant_year ?? null`.** Both queries use `select("*")` + cast to `AdminApplication[]` — the field flows through implicitly. Consumer-side `!= null` guard handles the undefined (pre-migration) case. Adding a mapper transform would be dead-weight normalization.
+4. **Mismatch pill placed at TWO sites, not one.** Spec called out the row-level pill. I added a second banner-style indicator inside the modal detail because the row-level pill wouldn't be visible after the admin clicks "View" and the modal covers the row. Both are guarded on the same condition.
+5. **Row header refactored to `flex flex-wrap items-center gap-1.5`** to accommodate the inline pill. Original was a raw text node with `·` separators; new structure wraps text in a `<span>` and pill as a sibling.
+6. **Applicant-year backfill semantics documented in-place.** SQL migration has explicit "migration snapshot, not apply-time snapshot" comment. Post-19 inserts get true tamper-proof snapshots via trigger. Pre-19 rows get the current-year snapshot which by definition equals `profile.year` at migration time — mismatch pill stays silent.
+7. **Backfill wrapped in `alter table disable/enable trigger`** — first run of the migration failed at the backfill with `errcode 22023: This application is locked` from `trg_enforce_application_phase`. Any applications whose drive was already in `result` phase (post-publish) triggered the phase-freeze rejection. Fix: disable `trg_enforce_application_phase` around the UPDATE (Lesson 4 pattern; same fix used in `09c_recruitments.sql` migration). Re-enable immediately after. Idempotent because the migration uses `add column if not exists` and `applicant_year is null` guard — safe to re-run.
+
+## Verification
+
+- `npx tsc --noEmit` — **exit 0** at every checkpoint (after safeNextPath creation, after each patch, after admin-applications extension, after review row modifications).
+- Grep sweep for bare `startsWith("/")` outside `safe-next.ts` — zero hits.
+- Grep sweep for old `safeNext` helper — zero hits.
+- Signout route grep — POST only, no GET export.
+- Navbar grep — `SignoutButton` import + usage, no residual anchor.
+
+## Not verified here (needs live smoke against applied SQL)
+
+- **Cross-origin CSRF probe**: try `<form action="https://prod-domain/auth/signout" method="POST">` from a separate origin — should return 403 Forbidden.
+- **Direct GET on `/auth/signout`**: browser address bar or `<img src>` embed — should return 405 Method Not Allowed.
+- **applicant_year snapshot tamper-proof**: try direct SQL insert with `applicant_year: 999` — trigger should overwrite to `profile.year`.
+- **Year freeze**: as Recruit (non-sysadmin), change year → success (first time or >6 months); immediately try again → 42501 with the "locked until DATE" message.
+- **Sysadmin bypass on year update**: as Gladiator, update Recruit's year unconditionally — should succeed.
+- **Mismatch pill visibility**: apply as Year 2 → sysadmin bumps Recruit to Year 3 → admin review row shows `⚠ Applied as Year 2` in both row and modal.
+- **safeNextPath attack surface**: `/auth/callback?next=//evil.com`, `/auth/callback?next=javascript:alert(1)`, `/auth/callback?next=/\evil.com`, `/auth/callback?next=http://evil.com` — all should redirect to `/` (or their fallback like `/profile`).
+- **Signout confirmation UX**: navbar Sign out → modal appears → Cancel keeps session → Confirm signs out and redirects home. Test on mobile viewport.
+- **Existing users at deploy time** may hit a single 405 mid-deploy if they had the old GET signout URL cached — waived per spec (test users only).
+
+Full smoke checklist is in `SETUP_STEP19.md` sections A–F.
+
+## To apply before shipping
+
+1. **Backup DB** (git commit is already implicit; take a Supabase snapshot in the dashboard).
+2. Run [supabase/19_security_hardening.sql](supabase/19_security_hardening.sql) in the Supabase SQL editor.
+3. Uncomment and run the sanity check queries at the bottom of that file:
+   - Column existence: expect 2 rows total (`applicant_year` on `applications`, `year_updated_at` on `profiles`).
+   - Backfill count: `applicant_year` should be non-null for all applications where `profile.year` is set.
+   - Trigger existence: `snapshot_applicant_year_trigger` + `enforce_year_freeze_trigger` — expect 2 rows.
+4. Regenerate `lib/database.types.ts` via `supabase gen types` — cleans up the manual `AdminApplication.applicant_year` override (harmless if left; nice to have consolidated).
+5. Re-run `npx tsc --noEmit` locally after regen to confirm no drift.
+6. Local `npm run build` before push.
+
+## What Step 19 did NOT touch
+
+- Year update mechanism UI (semester tracking + auto-counter) — **step 26** territory.
+- Question-edit data integrity — **step 20** scope.
+- Rate-limit on year updates for admin flow beyond sysadmin bypass — sysadmin is the only bypass in this step.
+- WAF or infrastructure-level CSRF protection — out of scope. Application-level Origin check is sufficient for this project's threat model.
+- Any RLS policy audit — out of scope.
+- Any RPC signature changes — out of scope.
+
+## After Step 19
+
+Roadmap continues:
+- **Step 20** — Question-edit data integrity + applicant notification (snapshot prompts on `applications.responses` + Resend email pipeline for drive edits).
+- **Step 21** — Public club pages refinement + `club_team` display + per-club role hierarchy customization.
+
+Step 19 closes the security-hardening pass and unblocks step 20's notification work on a trusted auth surface.

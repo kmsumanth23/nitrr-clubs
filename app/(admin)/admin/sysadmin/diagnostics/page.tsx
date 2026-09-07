@@ -5,6 +5,7 @@ import { isSysadmin } from "@/lib/queries/sysadmin";
 import { getCounterDrift } from "@/lib/queries/counter-drift";
 import { CounterDriftTable } from "@/components/admin/counter-drift-table";
 import { RecomputeAllButton } from "@/components/admin/recompute-all-button";
+import { SysadminYearOverride } from "@/components/admin/sysadmin-year-override";
 
 export const metadata = { title: "Diagnostics — Sysadmin" };
 export const dynamic = "force-dynamic";
@@ -58,6 +59,16 @@ export default async function SysadminDiagnosticsPage() {
         )}
 
         <CounterDriftTable rows={drift} />
+      </section>
+
+      {/* 19b — Year override escape hatch */}
+      <section className="mt-10">
+        <div className="mb-3">
+          <h2 className="text-xs font-bold uppercase tracking-wide text-ink-soft">
+            Year override
+          </h2>
+        </div>
+        <SysadminYearOverride />
       </section>
     </section>
   );

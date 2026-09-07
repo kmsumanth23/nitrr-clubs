@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/supabase__server";
 import { CompleteProfileForm } from "@/components/profile/complete-profile-form";
+import { safeNextPath } from "@/lib/auth/safe-next";
 
 export const metadata = { title: "Complete your profile — NITRR Clubs" };
 
@@ -22,8 +23,12 @@ export default async function CompleteProfilePage({
     .maybeSingle();
 
   // Profile already complete — skip straight to destination.
+  // 19: safeNextPath hardens against protocol-relative / scheme / backslash
+  // bypasses. Fallback here is `/profile` (not `/`) — bare-`/` from the
+  // helper means "no valid target provided", so we land on the profile page.
   if (profile?.roll_number && profile?.branch && profile?.year) {
-    redirect(next && next.startsWith("/") ? next : "/profile");
+    const safe = safeNextPath(next ?? null);
+    redirect(safe === "/" ? "/profile" : safe);
   }
 
   return (

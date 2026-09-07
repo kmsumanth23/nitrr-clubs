@@ -6,12 +6,12 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   IconUser,
   IconLayoutDashboard,
-  IconLogout,
   IconShieldCheck,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Pill } from "@/components/ui/pill";
 import { AuthModal } from "@/components/layout/auth-modal";
+import { SignoutButton } from "@/components/layout/signout-button";
 import { useUser } from "@/lib/hooks/use-user";
 
 type NavItem = { label: string; type: "scroll" | "route"; target: string };
@@ -190,12 +190,7 @@ export function Navbar() {
                       <IconLayoutDashboard size={16} /> Admin
                     </Link>
                   )}
-                  <a
-                    href="/auth/signout"
-                    className="flex items-center gap-2.5 border-t border-line px-4 py-2.5 text-sm text-clay hover:bg-cream"
-                  >
-                    <IconLogout size={16} /> Sign out
-                  </a>
+                  <SignoutButton onCloseMenu={() => setMenuOpen(false)} />
                 </div>
               )}
             </div>

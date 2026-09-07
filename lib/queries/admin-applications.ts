@@ -19,6 +19,9 @@ export interface AdminApplication extends Application {
         Profile,
         "id" | "full_name" | "email" | "roll_number" | "year" | "branch"
       > | null);
+  // `applicant_year` (19: apply-time snapshot, tamper-proof via trigger) now
+  // comes through the base `Application` type via `database.types.ts` regen.
+  // The step-18 sweep removed the manual override that used to sit here.
   /** 16B-addendum: append-only note history, newest first. Populated only by
    *  `getApplicationsForDrive`; other queries leave it undefined. */
   notes?: ApplicationNote[];

@@ -63,10 +63,25 @@ export function ApplicationReviewRow({
         <div className="truncate text-sm font-medium text-ink">
           {app.applicant?.full_name ?? "—"}
         </div>
-        <div className="mt-0.5 text-xs text-ink-soft">
-          {app.applicant?.roll_number ?? "—"}
-          {app.applicant?.year && <> · Year {app.applicant.year}</>}
-          {app.applicant?.branch && <> · {app.applicant.branch}</>}
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-ink-soft">
+          <span>
+            {app.applicant?.roll_number ?? "—"}
+            {app.applicant?.year && <> · Year {app.applicant.year}</>}
+            {app.applicant?.branch && <> · {app.applicant.branch}</>}
+          </span>
+          {/* 19: applicant_year snapshot mismatch — student's profile year
+              changed after they applied. Only renders when values genuinely
+              differ (pre-19 backfills equal current year, so silent). */}
+          {app.applicant_year != null &&
+            app.applicant?.year != null &&
+            app.applicant_year !== app.applicant.year && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-clay/10 px-2 py-0.5 text-[10px] font-medium text-clay"
+                title={`Applicant was Year ${app.applicant_year} when they applied. Current profile year is ${app.applicant.year}.`}
+              >
+                ⚠ Applied as Year {app.applicant_year}
+              </span>
+            )}
         </div>
         <div className="mt-0.5 text-[11px] text-ink-soft">
           Applied {new Date(app.created_at).toLocaleDateString("en-IN")}
@@ -153,6 +168,20 @@ function ApplicationDetail({
           />
           <Snap label="Branch" value={app.applicant?.branch ?? null} />
         </div>
+        {/* 19: same mismatch indicator as the row header — surfaced inside
+            the modal so admins reviewing an application don't have to scroll
+            back to the row to see the year discrepancy. */}
+        {app.applicant_year != null &&
+          app.applicant?.year != null &&
+          app.applicant_year !== app.applicant.year && (
+            <div className="mt-2 inline-flex items-start gap-1 rounded-xl border border-clay/30 bg-clay/5 px-3 py-1.5 text-[11px] text-clay">
+              <span aria-hidden>⚠</span>
+              <span>
+                Applied as <strong>Year {app.applicant_year}</strong>. Current
+                profile year is <strong>Year {app.applicant.year}</strong>.
+              </span>
+            </div>
+          )}
       </div>
 
       {/* 17C: ranked department preferences — shown when drive has depts.
